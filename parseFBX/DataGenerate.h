@@ -11,7 +11,8 @@ static std::map<std::string, std::string> gNodePath2Name;
 static std::map<std::string, std::vector<std::string>> gNodeName2BoneName;
 static std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
 static std::map<std::string, std::string> gBlendShapeMesh2Bone;
-
+static std::string gOutPutDir;
+static std::string gOutPutDirSantinized;
 #pragma region FileProcess 
 std::string CodeTUTF8(const char* str, int t)
 {
@@ -196,6 +197,112 @@ void DeleteEmptyFolders(const std::string& sourcePath) {
 			currentPath.clear();
 		}
 	}
+}
+typedef unsigned long ucs4;
+typedef unsigned char utf8;
+enum { IllegalSequence = 0x0FFFD };
+ucs4 DecodeUTF8_Secure(utf8*& readPtr)
+{
+	ucs4 result;
+
+#define FIRST_BYTE(mask, shift)  result = (c & (mask)) << (shift);
+#define NEXT_BYTE(shift) c=*readPtr; if (c==0) return 0; if ((c&0xC0) != 0x80) return IllegalSequence; readPtr++; result |= (c&0x3F) << shift;
+
+	char c = *readPtr;
+	if (c == 0)
+		return '\0';
+	readPtr++;
+
+	if ((c & 0x80) == 0)
+	{
+		// Conventional 7-bit ASCII.
+		return (ucs4)c;
+	}
+	else if ((c & 0xE0) == 0xC0)
+	{
+		// Two-byte sequence.
+		FIRST_BYTE(0x1F, 6);
+		NEXT_BYTE(0);
+		if (result < 0x80)
+			return IllegalSequence;                 // overlong
+	}
+	else if ((c & 0xF0) == 0xE0)
+	{
+		// Three-byte sequence.
+		FIRST_BYTE(0x0F, 12);
+		NEXT_BYTE(6);
+		NEXT_BYTE(0);
+		if (result < 0x800)
+			return IllegalSequence;                 // overlong
+		if (result >= 0x0D800 && result <= 0x0DFFF)
+			return IllegalSequence;                                         // not valid ISO 10646
+		if (result == 0x0FFFE || result == 0x0FFFF)
+			return IllegalSequence;                                         // not valid ISO 10646
+	}
+	else if ((c & 0xF8) == 0xF0)
+	{
+		// Four-byte sequence.
+		FIRST_BYTE(0x07, 18);
+		NEXT_BYTE(12);
+		NEXT_BYTE(6);
+		NEXT_BYTE(0);
+		if (result < 0x010000)
+			return IllegalSequence;                     // overlong
+	}
+	else if ((c & 0xFC) == 0xF8)
+	{
+		// Five-byte sequence.
+		FIRST_BYTE(0x03, 24);
+		NEXT_BYTE(18);
+		NEXT_BYTE(12);
+		NEXT_BYTE(6);
+		NEXT_BYTE(0);
+		if (result < 0x0200000)
+			return IllegalSequence;                     // overlong
+	}
+	else if ((c & 0xFE) == 0xFC)
+	{
+		// Six-byte sequence.
+		FIRST_BYTE(0x01, 30);
+		NEXT_BYTE(24);
+		NEXT_BYTE(18);
+		NEXT_BYTE(12);
+		NEXT_BYTE(6);
+		NEXT_BYTE(0);
+		if (result < 0x04000000)
+			return IllegalSequence;                         // overlong
+	}
+	else
+	{
+		// Invalid.
+		return IllegalSequence;
+	}
+	return result;
+}
+std::string SanitizeName(const std::string& name) {
+	std::string sanitized;
+	utf8* ptr = (utf8*)(name.c_str());
+	utf8* end = ptr + name.size();
+
+	while (ptr < end) {
+		utf8* oldPtr = ptr;
+		ucs4 ch = DecodeUTF8_Secure(ptr);
+
+		if (ch == IllegalSequence) {
+			while (oldPtr != ptr) {
+				sanitized += '_';
+				oldPtr++;
+			}
+		}
+		else if (ch < 0x20) {
+			sanitized += '_';
+		}
+		else {
+			sanitized += *oldPtr;
+		}
+	}
+
+	return sanitized;
 }
 #pragma endregion
 
@@ -502,10 +609,9 @@ void BuildMeshTxt(FBXMesh& meshData, FBXImportScene& importScene, const char* ou
 }
 
 
-void BuildSingleMesh(FBXMesh& meshData, FBXImportScene& importScene, std::string& filename, const char* outdir)
+void BuildSingleMesh(FBXMesh& meshData, FBXImportScene& importScene, std::string& filename, const char* outdir,std::string& realPath)
 {
 	EnsureDirectoryExists(outdir);
-	
 	bool isSkinnedMesh = false;
 	message::UGCResSkinnedMeshExtData extData = BuildMeshExtData(meshData);
 	if (extData.bonenames_size() > 0)
@@ -538,8 +644,14 @@ void BuildSingleMesh(FBXMesh& meshData, FBXImportScene& importScene, std::string
 		extData.SerializePartialToOstream(&osData);
 	osData.close();
 	//Rename To Support Chinese		
-	std::wstring meshfilenameW = ConvertUTF8ToWide(meshfilename);
-	RenameFileToWide(meshfilename, meshfilenameW);
+	std::string dstDirectory(gOutPutDir);
+	realPath = std::string(meshData.name);
+	if (isSkinnedMesh)
+		realPath = dstDirectory + "/" + realPath + ".~@FFSKIN";
+	else
+		realPath = dstDirectory + "/" + realPath + ".~@FFFUB";
+	auto dstMeshfilenameW = ConvertUTF8ToWide(realPath);
+	RenameFileToWide(meshfilename, dstMeshfilenameW);
 #if DebugMeshInfoOutput
 	BuildMeshTxt(meshData, importScene, outdir);
 	ParseSingleMesh(meshfilename);
@@ -826,8 +938,12 @@ void BuildSingleAnimProtoFile(FBXImportScene& scene, FBXImportAnimationClip& cli
 	output.close();
 
 	//Rename To Support Chinese		
-	std::wstring meshfilenameW = ConvertUTF8ToWide(filename);
-	RenameFileToWide(filename, meshfilenameW);
+	std::string dstDirectory(gOutPutDir);
+	std::string dstAnimfilename(clip.name);
+	dstAnimfilename = dstDirectory + "/" + dstAnimfilename + ".Anim";
+	std::wstring dstMeshfilenameW = ConvertUTF8ToWide(dstAnimfilename);
+	RenameFileToWide(filename, dstMeshfilenameW);
+
 
 #if DebugMeshInfoOutput
 	ParseAnimProto(AnimClipProto);
@@ -957,8 +1073,11 @@ void BuildSingleAnimBinaryFile(FBXImportScene& scene, FBXImportAnimationClip& cl
 	}
 
 	osData.close();
-	//Rename To Support Chinese		
-	std::wstring AnimfilenameW = ConvertUTF8ToWide(Animfilename);
+	//Rename To Support Chinese	
+	std::string dstDirectory(gOutPutDir);
+	std::string dstAnimfilename(clip.name);
+	dstAnimfilename = dstDirectory + "/" + dstAnimfilename + ".Anim";
+	std::wstring AnimfilenameW = ConvertUTF8ToWide(dstAnimfilename);
 	RenameFileToWide(Animfilename, AnimfilenameW);
 	//ParseSingleAnim(Animfilename);
 
@@ -1077,7 +1196,10 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 
 	osData.close();
 	//Rename To Support Chinese		
-	std::wstring AnimfilenameW = ConvertUTF8ToWide(Animfilename);
+	std::string dstDirectory(gOutPutDir);
+	std::string dstAnimfilename(clip.name);
+	dstAnimfilename = dstDirectory + "/" + dstAnimfilename + "_anim.txt";
+	std::wstring AnimfilenameW = ConvertUTF8ToWide(dstAnimfilename);
 	RenameFileToWide(Animfilename, AnimfilenameW);
 }
 

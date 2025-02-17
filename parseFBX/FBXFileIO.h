@@ -255,8 +255,10 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 	for (int i = 0; i < meshcount; i++)
 	{
 		std::string meshfilename;
-		BuildSingleMesh(gameObj->meshList[i], importScene,meshfilename, outdir);
-		meshname += meshfilename + "\n";
+		std::string realFileName;
+		BuildSingleMesh(gameObj->meshList[i], importScene,meshfilename, outdir, realFileName);
+		
+		meshname += realFileName + "\n";
 		meshtomatindex.insert(meshtomatindex.end(), gameObj->meshList[i].materialindex.begin(), gameObj->meshList[i].materialindex.end());
 		meshtomatindex.push_back(-1);
 	}
@@ -393,8 +395,11 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 	osData.close();
 
 	//Rename To Support Chinese		
-	std::wstring outputfilenameW = ConvertUTF8ToWide(outputfilename);
-	RenameFileToWide(outputfilename, outputfilenameW);
+	std::string dstDirectory(gOutPutDir);
+	std::string dstfilename(filename);
+	dstfilename = dstDirectory + "/" + dstfilename + ".json";
+	std::wstring dstfilenameW = ConvertUTF8ToWide(dstfilename);
+	RenameFileToWide(outputfilename, dstfilenameW);
 }
 void WriteManifestErrorInput(const char* outdir, std::string filename,std::vector<std::string> errormesh)
 {
@@ -436,8 +441,11 @@ void WriteManifestErrorInput(const char* outdir, std::string filename,std::vecto
 
 
 	//Rename To Support Chinese		
-	std::wstring outputfilenameW = ConvertUTF8ToWide(outputfilename);
-	RenameFileToWide(outputfilename, outputfilenameW);
+	std::string dstDirectory(gOutPutDir);
+	std::string dstfilename(filename);
+	dstfilename = dstDirectory + "/" + dstfilename + ".json";
+	std::wstring dstfilenameW = ConvertUTF8ToWide(dstfilename);
+	RenameFileToWide(outputfilename, dstfilenameW);
 
 }
 void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char* filename)
@@ -503,7 +511,10 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 	}
 	output.close();
 	//Rename To Support Chinese		
-	std::wstring OutputFileNameW = ConvertUTF8ToWide(OutputFileName);
+	std::string dstDirectory(gOutPutDir);
+	std::string dstfilename(filename);
+	dstfilename = dstDirectory + "/" + dstfilename + ".sk";
+	std::wstring OutputFileNameW = ConvertUTF8ToWide(dstfilename);
 	RenameFileToWide(OutputFileName, OutputFileNameW);
 
 

@@ -1195,7 +1195,15 @@ void ParseFBX(char* fbxpath, char* outdir, char* paramater)
         }
         else
         {
-            auto outdirUtf8 = CodeTUTF8(outdir, CP_ACP);
+            if (outdir != nullptr) {                
+                gOutPutDir = CodeTUTF8(outdir, CP_ACP);
+                gOutPutDirSantinized = SanitizeName(outdir);
+            }
+            else {
+                gOutPutDir.clear();
+                gOutPutDirSantinized.clear();
+            }
+            auto outdirUtf8 = CodeTUTF8(gOutPutDirSantinized.c_str(), CP_ACP);
             std::vector<char> pathOutDir(outdirUtf8.begin(), outdirUtf8.end());
             pathOutDir.push_back('\0');
             ParseFBXScene(lSdkManager, *lScene, pathOutDir.data());
