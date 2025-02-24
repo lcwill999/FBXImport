@@ -274,7 +274,7 @@ void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* n
 {
 
     FbxVector4 translation, eulerRotation, scale;
-
+    outNode.eulerRotation = ExtractFBXEulerOld(node->LclRotation.EvaluateValue(0));
     outNode.rotation = ExtractQuaternionFromFBXEulerOld(node->LclRotation.EvaluateValue(0));
     outNode.position = FBXPointToVector3Remap(node->LclTranslation.EvaluateValue(0));
     outNode.scale = FBXPointToVector3(node->LclScaling.EvaluateValue(0));

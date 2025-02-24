@@ -448,6 +448,12 @@ inline Quaternionf ExtractQuaternionFromFBXEuler(FbxVector4 euler, EFbxRotationO
 	return quat;
 }
 
+inline Vector3f ExtractFBXEulerOld(FbxVector4 euler)
+{
+	Vector3f eular(euler[0], -euler[1], -euler[2]);
+	return eular;
+}
+
 inline Quaternionf ExtractQuaternionFromFBXEulerOld(FbxVector4 euler)
 {
 	euler[1] = -euler[1];

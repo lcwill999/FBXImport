@@ -353,6 +353,7 @@ struct FBXImportNode
 	std::string name;
 	Vector3f    position; // zero (default)
 	Quaternionf rotation; // identity (default)
+	Vector3f    eulerRotation;// Only for manifest
 	Vector3f    scale; // identity (default)
 	Matrix4x4f  meshTransform;// identity (default)
 	int         cameraIndex;

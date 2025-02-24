@@ -361,6 +361,7 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 		}
 		
 		const FBXImportNode* result = findFirstMatchingMeshNode(nodes, name);
+		Vector3f eular = QuaternionToEuler(result->rotation);
 		if (result != nullptr) {
 
 			osData << "," << std::endl;
@@ -370,10 +371,9 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 				<< result->position.y * importScene.fileScaleFactor << ", "
 				<< result->position.z * importScene.fileScaleFactor << "]," << std::endl;
 			osData << "          \"Rotation\" : ["
-				<< result->rotation.x << ", "
-				<< result->rotation.y << ", "
-				<< result->rotation.z << ", "
-				<< result->rotation.w <<
+				<< result->eulerRotation.x << ", "
+				<< result->eulerRotation.y << ", "
+				<< result->eulerRotation.z <<
 				"]," << std::endl;
 			osData << "          \"Scale\" : ["
 				<< result->scale.x << ", "
