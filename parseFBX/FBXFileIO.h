@@ -483,14 +483,22 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 	{
 		// single root- rename the single name as root
 		auto rootnode = allnodes[0];
-		pos->set_x(rootnode.position.x * scaleFactor); pos->set_y(rootnode.position.y * scaleFactor); pos->set_z(rootnode.position.z * scaleFactor);
-		scale->set_x(rootnode.scale.x); scale->set_y(rootnode.scale.y); scale->set_z(rootnode.scale.z);
-		quat->set_x(rootnode.rotation.x); quat->set_y(rootnode.rotation.y); quat->set_z(rootnode.rotation.z); quat->set_w(rootnode.rotation.w);
-
-		auto childnodes = rootnode.children;
-		for (auto i = 0; i < childnodes.size(); i++)
+		
+		if (rootnode.name == UNITY_BONE_ROOT)
 		{
-			BuildBoneNodeData(scene, childnodes[i], root);
+			BuildBoneNodeData(scene, rootnode, root);
+		}
+		else
+		{
+			pos->set_x(rootnode.position.x * scaleFactor); pos->set_y(rootnode.position.y * scaleFactor); pos->set_z(rootnode.position.z * scaleFactor);
+			scale->set_x(rootnode.scale.x); scale->set_y(rootnode.scale.y); scale->set_z(rootnode.scale.z);
+			quat->set_x(rootnode.rotation.x); quat->set_y(rootnode.rotation.y); quat->set_z(rootnode.rotation.z); quat->set_w(rootnode.rotation.w);
+
+			auto childnodes = rootnode.children;
+			for (auto i = 0; i < childnodes.size(); i++)
+			{
+				BuildBoneNodeData(scene, childnodes[i], root);
+			}
 		}
 	}
 	//else

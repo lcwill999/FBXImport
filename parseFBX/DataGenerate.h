@@ -41,7 +41,7 @@ std::wstring ConvertToWide(const char* utf8Str) {
 
 	int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, utf8Str, -1, NULL, 0);
 	if (sizeNeeded <= 0) {
-		//std::wcerr << L"MultiByteToWideChar ×ª»»Ê§°Ü£¡" << std::endl;
+		//std::wcerr << L"MultiByteToWideChar ×ªï¿½ï¿½Ê§ï¿½Ü£ï¿½" << std::endl;
 		return L"";
 	}
 
@@ -56,7 +56,7 @@ std::wstring ConvertUTF8ToWide(const std::string& utf8Str) {
 std::wstring MultiByteToWide(const std::string& multiByteStr, UINT codePage) {
 	int sizeNeeded = MultiByteToWideChar(codePage, 0, multiByteStr.c_str(), -1, NULL, 0);
 	if (sizeNeeded <= 0) {
-		//throw std::runtime_error("¶à×Ö½Ú×Ö·û´®×ª¿í×Ö·ûÊ§°Ü");
+		//throw std::runtime_error("ï¿½ï¿½ï¿½Ö½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½×ªï¿½ï¿½ï¿½Ö·ï¿½Ê§ï¿½ï¿½");
 	}
 	std::wstring wideStr(sizeNeeded - 1, 0); 
 	MultiByteToWideChar(codePage, 0, multiByteStr.c_str(), -1, &wideStr[0], sizeNeeded);
@@ -70,7 +70,7 @@ void EnsureDirectoryExists(const std::wstring& directoryPath) {
 			return;
 		}
 		else {
-			//std::wcerr << L"Â·¾¶´æÔÚ£¬µ«²»ÊÇÄ¿Â¼: " << directoryPath << std::endl;
+			//std::wcerr << L"Â·ï¿½ï¿½ï¿½ï¿½ï¿½Ú£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿Â¼: " << directoryPath << std::endl;
 			return;
 		}
 	}
@@ -81,16 +81,15 @@ void EnsureDirectoryExists(const std::wstring& directoryPath) {
 	}
 
 	if (CreateDirectoryW(directoryPath.c_str(), NULL)) {
-		//std::wcout << L"³É¹¦´´½¨Ä¿Â¼: " << directoryPath << std::endl;
 	}
 	else {
 		DWORD error = GetLastError();
 		if (error == ERROR_ALREADY_EXISTS) {
-			// ºöÂÔÄ¿Â¼ÒÑ´æÔÚµÄ´íÎó
+			// ï¿½ï¿½ï¿½ï¿½Ä¿Â¼ï¿½Ñ´ï¿½ï¿½ÚµÄ´ï¿½ï¿½ï¿½
 			return;
 		}
 		else {
-			//std::wcerr << L"ÎÞ·¨´´½¨Ä¿Â¼: " << directoryPath << L"£¬´íÎó´úÂë: " << error << std::endl;
+			//std::wcerr << L"ï¿½Þ·ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿Â¼: " << directoryPath << L"ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: " << error << std::endl;
 		}
 	}
 }
@@ -134,15 +133,15 @@ void RenameFileToWide(const std::string& originalName, const std::wstring& newNa
 		}
 
 		if (MoveFileExW(wideOriginalName.c_str(), newName.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-			//std::wcout << L"ÎÄ¼þÖØÃüÃû³É¹¦£¡´Ó " << wideOriginalName << L" µ½ " << newName << std::endl;
+			//std::wcout << L"ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É¹ï¿½ï¿½ï¿½ï¿½ï¿½ " << wideOriginalName << L" ï¿½ï¿½ " << newName << std::endl;
 		}
 		else {
 			//DWORD error = GetLastError();
-			//std::wcerr << L"ÎÄ¼þÖØÃüÃûÊ§°Ü£¬´íÎó´úÂë: " << error << std::endl;
+			//std::wcerr << L"ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: " << error << std::endl;
 		}
 	}
 	catch (const std::exception& e) {
-		//std::cerr << "´íÎó: " << e.what() << std::endl;
+		//std::cerr << "ï¿½ï¿½ï¿½ï¿½: " << e.what() << std::endl;
 	}
 }
 bool IsSubPath(const std::wstring& sourcePath, const std::wstring& targetPath) {
@@ -457,10 +456,15 @@ void BuildAllBoneNameMap(FBXImportScene& scene)
 	}
 	else if (allnodes.size() == 1)
 	{
-		auto children = allnodes[0].children;
-		for (auto i = 0; i < children.size(); i++)
+		std::vector<FBXImportNode> root = allnodes[0].children;
+		if (allnodes[0].name == UNITY_BONE_ROOT)
 		{
-			BuildBoneNameMap(children[i], gNodePath2Name);
+			root  = allnodes;
+		}
+
+		for (auto i = 0; i < root.size(); i++)
+		{
+			BuildBoneNameMap(root[i], gNodePath2Name);
 		}
 	}
 }
