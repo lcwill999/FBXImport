@@ -1,4 +1,5 @@
 #pragma once
+#include <stdio.h>
 #include "RotationOrder.h"
 #include "Conversion.h"
 #include "math.h"

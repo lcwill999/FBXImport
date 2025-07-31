@@ -160,6 +160,7 @@
     <ClCompile Include="Commom.cpp" />
     <ClCompile Include="Components.cpp" />
     <ClCompile Include="Constraints.cpp" />
+    <ClCompile Include="DataGenerate.cpp" />
     <ClCompile Include="DLLInterface.cpp" />
     <ClCompile Include="parseFBX.cpp" />
     <ClCompile Include="proto\ProtoBuffCommon.pb.cc" />

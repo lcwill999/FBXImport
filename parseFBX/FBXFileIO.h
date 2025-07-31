@@ -70,7 +70,7 @@ void WriteMeshFile(FBXGameObject* gameObj, const char* outdir)
 	for (int i = 0; i < meshcount; i++)
 	{
 		std::string meshfilename(gameObj->meshList[i].name);
-		meshfilename = directory + "/" + meshfilename + ".~@FFFUB";
+		meshfilename = directory + "\\" + meshfilename + ".~@FFFUB";
 		meshname += meshfilename + "\n";
 		std::ofstream osData(meshfilename, std::ios_base::out | std::ios_base::binary);
 		uint64_t namecount = strlen(gameObj->meshList[i].name) + 1;
@@ -102,18 +102,18 @@ void WriteMeshFile(FBXGameObject* gameObj, const char* outdir)
 		osData.close();
 	}
 
-	std::cout << meshname << std::endl;
-	std::cout << materialname << std::endl;
+	fwrite(meshname.c_str(), 1, meshname.length(), stdout);
+	fwrite(materialname.c_str(), 1, materialname.length(), stdout);
 	int meshtoindexlen = meshtomatindex.size();
 	for (int i = 0; i < meshtoindexlen; i++)
 	{
-		std::cout << meshtomatindex[i] << std::endl;
+		printf("%d\n", meshtomatindex[i]);
 	}
 
 	if (meshcount > 0)
 	{
-		std::cout << std::endl;
-		std::cout << "import fbx success" << std::endl;
+		printf("\n");
+		printf("import fbx success\n");
 	}
 }
 void WriteMeshFileNew(FBXGameObject* gameObj, FBXImportScene& importScene, const char* outdir)
@@ -158,7 +158,7 @@ void WriteMeshFileNew(FBXGameObject* gameObj, FBXImportScene& importScene, const
 	{
 		std::string meshfilename(gameObj->meshList[i].name);
 
-		meshfilename = directory + "/" + meshfilename + ".~@FFFUB";
+		meshfilename = directory + "\\" + meshfilename + ".~@FFFUB";
 		meshname += meshfilename + "\n";
 		std::ofstream osData(meshfilename, std::ios_base::out | std::ios_base::binary);
 		osData.precision(8);
@@ -199,18 +199,18 @@ void WriteMeshFileNew(FBXGameObject* gameObj, FBXImportScene& importScene, const
 		osData.close();
 	}
 
-	std::cout << meshname << std::endl;
-	std::cout << materialname << std::endl;
+	fwrite(meshname.c_str(), 1, meshname.length(), stdout);
+	fwrite(materialname.c_str(), 1, materialname.length(), stdout);
 	int meshtoindexlen = meshtomatindex.size();
 	for (int i = 0; i < meshtoindexlen; i++)
 	{
-		std::cout << meshtomatindex[i] << std::endl;
+		printf("%d\n", meshtomatindex[i]);
 	}
 
 	if (meshcount > 0)
 	{
-		std::cout << std::endl;
-		std::cout << "import fbx success" << std::endl;
+		printf("\n");
+		printf("import fbx success\n");
 	}
 
 }
@@ -219,8 +219,6 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 	EnsureDirectoryExists(outdir);
 
 	uint64_t meshcount = gameObj->meshCount;
-	std::string materialname = "";
-
 	std::vector < std::string > materialnamelist;
 
 	for (int i = 0; i < importScene.materials.size(); i++)
@@ -228,7 +226,6 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 		if (std::find(materialnamelist.begin(), materialnamelist.end(), importScene.materials[i]) == materialnamelist.end())
 		{
 			materialnamelist.push_back(importScene.materials[i]);
-			materialname += importScene.materials[i] + "\n";
 		}
 	}
 	for (int i = 0; i < meshcount; i++)
@@ -248,7 +245,7 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 		}
 	}
 
-	std::string meshname = "";
+	std::vector<std::string> meshnamelist;
 	std::vector<int32_t> meshtomatindex;
 	std::string directory(outdir);
 
@@ -258,23 +255,35 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 		std::string realFileName;
 		BuildSingleMesh(gameObj->meshList[i], importScene,meshfilename, outdir, realFileName);
 		
-		meshname += realFileName + "\n";
+		meshnamelist.push_back(realFileName);
 		meshtomatindex.insert(meshtomatindex.end(), gameObj->meshList[i].materialindex.begin(), gameObj->meshList[i].materialindex.end());
 		meshtomatindex.push_back(-1);
 	}
 
-	std::cout << meshname << std::endl;
-	std::cout << materialname << std::endl;
+	// Output mesh names one line at a time
+	for (const auto& meshname : meshnamelist)
+	{
+		std::wstring wideStr = ConvertUTF8ToWide(meshname);
+		wprintf(L"%ls\n", wideStr.c_str());
+	}
+	
+	// Output material names one line at a time
+	for (const auto& materialname : materialnamelist)
+	{
+		std::wstring wideStr = ConvertUTF8ToWide(materialname);
+		wprintf(L"%ls\n", wideStr.c_str());
+	}
+	
 	int meshtoindexlen = meshtomatindex.size();
 	for (int i = 0; i < meshtoindexlen; i++)
 	{
-		std::cout << meshtomatindex[i] << std::endl;
+		wprintf(L"%d\n", meshtomatindex[i]);
 	}
 
 	if (meshcount > 0)
 	{
-		std::cout << std::endl;
-		std::cout << "import fbx success" << std::endl;
+		wprintf(L"\n");
+		wprintf(L"import fbx success\n");
 	}
 	WriteManifest(gameObj, materialnamelist, importScene, outdir, filename);
 }
@@ -313,7 +322,15 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 	EnsureDirectoryExists(outdir);
 
 	std::string directory(outdir);
-	auto outputfilename = directory + "/" + filename + ".json";
+	
+	// 使用系统临时目录创建临时文件，避免中文路径问题
+	char tempPath[MAX_PATH];
+	GetTempPathA(MAX_PATH, tempPath);
+	
+	char tempFileName[MAX_PATH];
+	GetTempFileNameA(tempPath, "MAN", 0, tempFileName);
+	std::string outputfilename(tempFileName);
+	
 	std::ofstream osData(outputfilename, std::ios_base::out | std::ios::binary);
 	osData << "{" << std::endl;
 
@@ -397,7 +414,7 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 	//Rename To Support Chinese		
 	std::string dstDirectory(gOutPutDir);
 	std::string dstfilename(filename);
-	dstfilename = dstDirectory + "/" + dstfilename + ".json";
+	dstfilename = dstDirectory + "\\" + dstfilename + ".json";
 	std::wstring dstfilenameW = ConvertUTF8ToWide(dstfilename);
 	RenameFileToWide(outputfilename, dstfilenameW);
 }
@@ -406,7 +423,15 @@ void WriteManifestErrorInput(const char* outdir, std::string filename,std::vecto
 	EnsureDirectoryExists(outdir);
 
 	std::string directory(outdir);
-	auto outputfilename = directory + "/" + filename + ".json";
+	
+	// 使用系统临时目录创建临时文件，避免中文路径问题
+	char tempPath[MAX_PATH];
+	GetTempPathA(MAX_PATH, tempPath);
+	
+	char tempFileName[MAX_PATH];
+	GetTempFileNameA(tempPath, "ERR", 0, tempFileName);
+	std::string outputfilename(tempFileName);
+	
 	std::ofstream osData(outputfilename, std::ios_base::out);
 	osData << "{" << std::endl;
 
@@ -443,7 +468,7 @@ void WriteManifestErrorInput(const char* outdir, std::string filename,std::vecto
 	//Rename To Support Chinese		
 	std::string dstDirectory(gOutPutDir);
 	std::string dstfilename(filename);
-	dstfilename = dstDirectory + "/" + dstfilename + ".json";
+	dstfilename = dstDirectory + "\\" + dstfilename + ".json";
 	std::wstring dstfilenameW = ConvertUTF8ToWide(dstfilename);
 	RenameFileToWide(outputfilename, dstfilenameW);
 
@@ -483,7 +508,6 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 	{
 		// single root- rename the single name as root
 		auto rootnode = allnodes[0];
-		
 		if (rootnode.name == UNITY_BONE_ROOT)
 		{
 			BuildBoneNodeData(scene, rootnode, root);
@@ -509,7 +533,14 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 
 	std::string directory(outdir);
 
-	auto OutputFileName = directory + "/" + filename + ".sk";
+	// 使用系统临时目录创建临时文件，避免中文路径问题
+	char tempPath[MAX_PATH];
+	GetTempPathA(MAX_PATH, tempPath);
+	
+	char tempFileName[MAX_PATH];
+	GetTempFileNameA(tempPath, "SKL", 0, tempFileName);
+	std::string OutputFileName(tempFileName);
+	
 	//Serialize
 	std::ofstream output(OutputFileName, std::ios::out | std::ios::trunc | std::ios::binary);
 	bool flag = sk->SerializePartialToOstream(&output);
@@ -521,7 +552,7 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 	//Rename To Support Chinese		
 	std::string dstDirectory(gOutPutDir);
 	std::string dstfilename(filename);
-	dstfilename = dstDirectory + "/" + dstfilename + ".sk";
+	dstfilename = dstDirectory + "\\" + dstfilename + ".sk";
 	std::wstring OutputFileNameW = ConvertUTF8ToWide(dstfilename);
 	RenameFileToWide(OutputFileName, OutputFileNameW);
 
@@ -567,7 +598,7 @@ void WriteMeshOutputFiles(FBXMesh& mesh, std::vector<int>& lodMeshMaterials, cha
 	std::string directory(outdir);
 
 	std::string meshfilename(mesh.name);
-	meshfilename = directory + "/" + meshfilename + ".txt";
+	meshfilename = directory + "\\" + meshfilename + ".txt";
 	std::ofstream osData(meshfilename, std::ios_base::out | std::ios_base::trunc);
 	osData << "vertices " << std::endl;
 	for (int j = 0; j < mesh.vertices.size(); j++)
@@ -632,7 +663,7 @@ void WriteFBXMeshOutputFiles(const FBXImportMesh& mesh, char* outdir)
 	std::string directory(outdir);
 
 	std::string meshfilename(mesh.name);
-	meshfilename = directory + "/" + meshfilename + ".txt";
+	meshfilename = directory + "\\" + meshfilename + ".txt";
 	std::ofstream osData(meshfilename, std::ios_base::out | std::ios_base::trunc);
 	osData << "vertices " << std::endl;
 	for (int j = 0; j < mesh.vertices.size(); j++)
@@ -692,7 +723,7 @@ void WriteSceneOutputFiles(FBXImportScene& outputScene, char* outdir)
 	for (int i = 0; i < outputScene.meshes.size(); i++)
 	{
 		std::string meshfilename(outputScene.meshes[i].name);
-		meshfilename = directory + "/" + meshfilename + ".txt";
+		meshfilename = directory + "\\" + meshfilename + ".txt";
 		std::ofstream osData(meshfilename, std::ios_base::out | std::ios_base::trunc);
 		osData << "vertices " << std::endl;
 		for (int j = 0; j < outputScene.meshes[i].vertices.size(); j++)
@@ -744,7 +775,7 @@ void WriteAnimClipFileTest(FBXImportScene& scene, const char* outdir)
 
 		std::string directory(outdir);
 		std::string filename(clip.name);
-		filename = directory + "/" + filename + ".txt";
+		filename = directory + "\\" + filename + ".txt";
 		std::ofstream osData(filename, std::ios_base::out | std::ios_base::trunc);
 		osData << "Curve Count: " << nodecurves.size() << std::endl;
 		for (auto it = nodecurves.begin(); it != nodecurves.end(); it++)
@@ -837,7 +868,7 @@ void PrintAnimFile(FBXImportScene& importScene, const char* outdir)
 
 		std::string directory(outdir);
 		std::string filename(clip.name);
-		filename = directory + "/" + filename + ".anim";
+		filename = directory + "\\" + filename + ".anim";
 
 		std::ofstream osData(filename, std::ios_base::out | std::ios_base::binary);
 		osData.precision(8);

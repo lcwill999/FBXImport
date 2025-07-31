@@ -272,7 +272,20 @@ void ConvertFBXMesh(FbxMesh& fbx, FbxManager* sdkManager, FbxScene& fbxScene, Fb
 
 void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* node, FBXImportNode& outNode, FBXImportScene& scene, const FBXImportSettings& settings, const FBXImportMeshSetting& meshSettings, FBXMeshToInfoMap& fbxMeshToInfoMap, FBXMaterialLookup& fbxMaterialLookup)
 {
-
+    if (node->GetSkeleton())
+    {
+        auto ptr = node->GetSkeleton();
+        if (ptr)
+        {
+            auto skeletonType = ptr->GetSkeletonType();
+            std::cout << "SkeletonType: " << skeletonType << std::endl;
+            //if (skeletonType == FbxSkeleton::eLimbNode)
+            {
+                std::cout << "SkeltonNode: " << ptr->GetName() << std::endl;
+            }
+        }
+    }
+    std::cout << "Node: " << node->GetNameWithoutNameSpacePrefix() << std::endl;
     FbxVector4 translation, eulerRotation, scale;
     outNode.eulerRotation = ExtractFBXEulerOld(node->LclRotation.EvaluateValue(0));
     outNode.rotation = ExtractQuaternionFromFBXEulerOld(node->LclRotation.EvaluateValue(0));
@@ -999,8 +1012,12 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
     for (int i = 0, c = root->GetChildCount(); i < c; ++i)
     {
         RecursiveImportNodes(fbxManager, fbxScene, root->GetChild(i), outputScene.nodes[i], outputScene,settings,meshSettings,fbxMeshToInfoMap, fbxMaterialLookup);
-		if (root->GetChild(i)->GetSkeleton())
+        if (root->GetChild(i)->GetSkeleton())
+        {
+            auto ptr = root->GetChild(i)->GetSkeleton();
             outputScene.sceneInfo.hasSkeleton = true;
+        }
+
     }
 
     //WriteSceneOutputFiles(outputScene, outdir);
@@ -1197,14 +1214,16 @@ void ParseFBX(char* fbxpath, char* outdir, char* paramater)
         {
             if (outdir != nullptr) {                
                 gOutPutDir = CodeTUTF8(outdir, CP_ACP);
-                gOutPutDirSantinized = SanitizeName(outdir);
+                // 统一路径分隔符为反斜杠
+                std::replace(gOutPutDir.begin(), gOutPutDir.end(), '/', '\\');
+                gOutPutDirSantinized = gOutPutDir;  // 保持原始路径，不进行清理
             }
             else {
                 gOutPutDir.clear();
                 gOutPutDirSantinized.clear();
             }
-            auto outdirUtf8 = CodeTUTF8(gOutPutDirSantinized.c_str(), CP_ACP);
-            std::vector<char> pathOutDir(outdirUtf8.begin(), outdirUtf8.end());
+            // gOutPutDirSantinized已经是UTF-8编码，直接使用
+            std::vector<char> pathOutDir(gOutPutDirSantinized.begin(), gOutPutDirSantinized.end());
             pathOutDir.push_back('\0');
             ParseFBXScene(lSdkManager, *lScene, pathOutDir.data());
         }
@@ -1212,5 +1231,103 @@ void ParseFBX(char* fbxpath, char* outdir, char* paramater)
     else
     {
         std::cout << " File Type is Error " << std::endl;
+    }
+}
+
+// 字符串转换工具函数实现
+std::string WideToUTF8(const std::wstring& wideStr) {
+    if (wideStr.empty()) return std::string();
+    
+    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), -1, NULL, 0, NULL, NULL);
+    if (sizeNeeded <= 0) return std::string();
+    
+    std::string utf8Str(sizeNeeded - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), -1, &utf8Str[0], sizeNeeded, NULL, NULL);
+    return utf8Str;
+}
+
+std::wstring UTF8ToWide(const std::string& utf8Str) {
+    if (utf8Str.empty()) return std::wstring();
+    
+    int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), -1, NULL, 0);
+    if (sizeNeeded <= 0) return std::wstring();
+    
+    std::wstring wideStr(sizeNeeded - 1, 0);
+    MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), -1, &wideStr[0], sizeNeeded);
+    return wideStr;
+}
+
+// 宽字符参数分割函数
+void SplitParameterW(const wchar_t* parameter)
+{
+    if (parameter == nullptr)
+        return;
+
+    std::string parameterUTF8 = WideToUTF8(parameter);
+    std::vector<std::string> plist;
+    Stringsplit(parameterUTF8, ";", plist);
+    for (int i = 0; i < plist.size(); i++)
+    {
+        std::vector<std::string> pResult;
+        Stringsplit(plist[i], "=", pResult);
+        if (pResult[0] == "globalscale")
+        {
+            gGlobalScale = atof(pResult[1].c_str());
+        }
+    }
+}
+
+void ParseFBXW(const wchar_t* fbxpath, const wchar_t* outdir, const wchar_t* parameter)
+{
+    FbxManager* lSdkManager = NULL;
+    FbxScene* lScene = NULL;
+    InitializeSdkObjects(lSdkManager, lScene);
+
+    std::string fbxUTF8 = WideToUTF8(fbxpath);
+    FbxString lFilePath(fbxUTF8.c_str());
+
+    std::string::size_type iPos = (fbxUTF8.find_last_of('\\') + 1) == 0 ? fbxUTF8.find_last_of('/') + 1 : fbxUTF8.find_last_of('\\') + 1;
+    std::string ImgName = fbxUTF8.substr(iPos, fbxUTF8.length() - iPos);
+    gFBXFileName = ImgName.substr(0, ImgName.rfind("."));
+    
+    SplitParameterW(parameter);
+    
+    if (!lFilePath.IsEmpty())
+    {
+        bool lResult = LoadScene(lSdkManager, lScene, lFilePath.Buffer());
+        if (lResult == false)
+        {
+            std::cout << "File type error: " << fbxUTF8 << std::endl;
+        }
+        else
+        {
+            std::string outdirUTF8;
+            if (outdir != nullptr) {
+                // 转换宽字符输出路径为UTF-8
+                outdirUTF8 = WideToUTF8(outdir);
+                // 统一路径分隔符为反斜杠
+                std::replace(outdirUTF8.begin(), outdirUTF8.end(), '/', '\\');
+                gOutPutDir = outdirUTF8;
+                gOutPutDirSantinized = outdirUTF8;  // 保持原始路径，不进行清理
+            }
+            else {
+                gOutPutDir.clear();
+                gOutPutDirSantinized.clear();
+            }
+            
+            // 使用宽字符创建输出目录
+            if (outdir != nullptr) {
+                EnsureDirectoryExists(std::wstring(outdir));
+            }
+            
+            // gOutPutDirSantinized已经是UTF-8编码，直接使用
+            std::vector<char> pathOutDir(gOutPutDirSantinized.begin(), gOutPutDirSantinized.end());
+            pathOutDir.push_back('\0');
+            ParseFBXScene(lSdkManager, *lScene, pathOutDir.data());
+        }
+    }
+    else
+    {
+        std::cout << "File type error: " << fbxUTF8 << std::endl;
     }
 }   

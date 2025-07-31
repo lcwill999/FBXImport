@@ -19,7 +19,7 @@
 #include "Conversion.h"
 #include "floatConversion.h"
 #include "RotationOrder.h"
-//#include "stringFormat.h"
+#include "stringFormat.h"
 #ifndef M_PI
 #define M_PI	3.1415926535897932384626433832795
 #endif

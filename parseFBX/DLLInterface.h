@@ -25,7 +25,13 @@ enum GfxPrimitiveType
 typedef std::pair<int, GfxPrimitiveType> SubsetKey;
 typedef std::map<SubsetKey, int> SubsetLookup;
 
-
 EXPORT_DLL void ParseFBX(char* fbxpath, char* outdir, char* parameter);
+
+// 新的宽字符支持接口 - 支持特殊字符和宽字符路径
+EXPORT_DLL void ParseFBXW(const wchar_t* fbxpath, const wchar_t* outdir, const wchar_t* parameter);
+
+// 字符串转换工具函数
+std::string WideToUTF8(const std::wstring& wideStr);
+std::wstring UTF8ToWide(const std::string& utf8Str);
 
 
