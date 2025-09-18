@@ -17,6 +17,7 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, FBXImportScene& importScene, const char* outdir, std::string filename);
 //Write Sk File
 void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char* filename);
+void CollectValidBoneNodesByLayer(const std::vector<FBXImportNode>& nodes, std::vector<FBXImportNode>& validBoneNodes);
 //Write Anim Clip File
 void WriteAnimClipProtoBuf(FBXImportScene& scene, const char* outdir);
 //-----------------------------------Output test-----------------------------------
@@ -294,12 +295,12 @@ bool findNodeByName(const FBXImportNode& node, const std::string& targetName) {
 }
 
 const FBXImportNode* findMeshNodeRecursive(const FBXImportNode& currentNode, const std::string& name) {
-	if (findNodeByName(currentNode, name)) {
+	if (findNodeByName(currentNode, name) && currentNode.meshIndex != -1) {
 		return &currentNode;
 	}
 	for (const auto& child : currentNode.children) {
 		const FBXImportNode* result = findMeshNodeRecursive(child, name);
-		if (result != nullptr) {
+		if (result != nullptr && result->meshIndex != -1) {
 			return result;
 		}
 	}
@@ -309,7 +310,7 @@ const FBXImportNode* findMeshNodeRecursive(const FBXImportNode& currentNode, con
 const FBXImportNode* findFirstMatchingMeshNode(const std::vector<FBXImportNode>& rootNodes, const std::string& name) {
 	for (const auto& rootNode : rootNodes) {
 		const FBXImportNode* result = findMeshNodeRecursive(rootNode, name);
-		if (result != nullptr) {
+		if (result != nullptr && result->meshIndex!=-1) {
 			return result;
 		}
 	}
@@ -473,6 +474,36 @@ void WriteManifestErrorInput(const char* outdir, std::string filename,std::vecto
 	RenameFileToWide(outputfilename, dstfilenameW);
 
 }
+
+
+void CollectValidBoneNodesByLayer(const std::vector<FBXImportNode>& nodes, std::vector<FBXImportNode>& validBoneNodes)
+{
+	for (const auto& node : nodes)
+	{
+		if (node.isBone)
+		{
+			validBoneNodes.push_back(node);
+		}
+	}
+	
+	if (validBoneNodes.empty())
+	{
+		std::vector<FBXImportNode> nextLevelNodes;
+		for (const auto& node : nodes)
+		{
+			if (!node.children.empty())
+			{
+				nextLevelNodes.insert(nextLevelNodes.end(), node.children.begin(), node.children.end());
+			}
+		}
+
+		if (!nextLevelNodes.empty())
+		{
+			CollectValidBoneNodesByLayer(nextLevelNodes, validBoneNodes);
+		}
+	}
+}
+
 void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char* filename)
 {
 	EnsureDirectoryExists(outdir);
@@ -496,34 +527,39 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 	root->set_allocated_localrotation(quat);
 
 	auto allnodes = scene.nodes;
-	if (allnodes.size() > 1)
+
+	auto validBoneNodes = std::vector<FBXImportNode>();
+	CollectValidBoneNodesByLayer(allnodes, validBoneNodes);
+
+	if (validBoneNodes.size() > 1)
 	{
 		// multi root - add an "root" node to ensure a single root tree
-		for (auto i = 0; i < allnodes.size(); i++)
+		for (auto i = 0; i < validBoneNodes.size(); i++)
 		{
-			BuildBoneNodeData(scene, allnodes[i], root);
+			BuildBoneNodeData(scene, validBoneNodes[i], root);
 		}
 	}
-	else if (allnodes.size() == 1 )
+	else if (validBoneNodes.size() == 1 )
 	{
 		// single root- rename the single name as root
-		auto rootnode = allnodes[0];
-		if (rootnode.name == UNITY_BONE_ROOT)
-		{
-			BuildBoneNodeData(scene, rootnode, root);
-		}
-		else
-		{
-			pos->set_x(rootnode.position.x * scaleFactor); pos->set_y(rootnode.position.y * scaleFactor); pos->set_z(rootnode.position.z * scaleFactor);
-			scale->set_x(rootnode.scale.x); scale->set_y(rootnode.scale.y); scale->set_z(rootnode.scale.z);
-			quat->set_x(rootnode.rotation.x); quat->set_y(rootnode.rotation.y); quat->set_z(rootnode.rotation.z); quat->set_w(rootnode.rotation.w);
+		BuildBoneNodeData(scene, validBoneNodes[0], root);
+		//auto rootnode = allnodes[0];
+		////if (rootnode.name == UNITY_BONE_ROOT)
+		//{
+		//	BuildBoneNodeData(scene, allnodes[0], root);
+		//}
+		//else
+		//{
+		//	pos->set_x(rootnode.position.x * scaleFactor); pos->set_y(rootnode.position.y * scaleFactor); pos->set_z(rootnode.position.z * scaleFactor);
+		//	scale->set_x(rootnode.scale.x); scale->set_y(rootnode.scale.y); scale->set_z(rootnode.scale.z);
+		//	quat->set_x(rootnode.rotation.x); quat->set_y(rootnode.rotation.y); quat->set_z(rootnode.rotation.z); quat->set_w(rootnode.rotation.w);
 
-			auto childnodes = rootnode.children;
-			for (auto i = 0; i < childnodes.size(); i++)
-			{
-				BuildBoneNodeData(scene, childnodes[i], root);
-			}
-		}
+		//	auto childnodes = rootnode.children;
+		//	for (auto i = 0; i < childnodes.size(); i++)
+		//	{
+		//		BuildBoneNodeData(scene, childnodes[i], root);
+		//	}
+		//}
 	}
 	//else
 	//{

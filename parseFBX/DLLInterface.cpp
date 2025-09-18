@@ -14,6 +14,7 @@
 #include "dynamic_bitset.h"
 #include "Components.h"
 #include "Constraints.h"
+#include "DataGenerate.h"
 
 
 static bool gIsBrokenLightwaveFile = false;
@@ -272,20 +273,6 @@ void ConvertFBXMesh(FbxMesh& fbx, FbxManager* sdkManager, FbxScene& fbxScene, Fb
 
 void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* node, FBXImportNode& outNode, FBXImportScene& scene, const FBXImportSettings& settings, const FBXImportMeshSetting& meshSettings, FBXMeshToInfoMap& fbxMeshToInfoMap, FBXMaterialLookup& fbxMaterialLookup)
 {
-    if (node->GetSkeleton())
-    {
-        auto ptr = node->GetSkeleton();
-        if (ptr)
-        {
-            auto skeletonType = ptr->GetSkeletonType();
-            std::cout << "SkeletonType: " << skeletonType << std::endl;
-            //if (skeletonType == FbxSkeleton::eLimbNode)
-            {
-                std::cout << "SkeltonNode: " << ptr->GetName() << std::endl;
-            }
-        }
-    }
-    std::cout << "Node: " << node->GetNameWithoutNameSpacePrefix() << std::endl;
     FbxVector4 translation, eulerRotation, scale;
     outNode.eulerRotation = ExtractFBXEulerOld(node->LclRotation.EvaluateValue(0));
     outNode.rotation = ExtractQuaternionFromFBXEulerOld(node->LclRotation.EvaluateValue(0));
@@ -302,6 +289,11 @@ void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* n
         parent = current->GetParent();
     }
 
+    if (node->GetSkeleton())
+        outNode.isBone = true;
+    else
+        outNode.isBone = false;
+
     //todo: parse user data
     //ExtractCustomProperties(outNode, node, settings);
     outNode.name = node->GetNameWithoutNameSpacePrefix();   
@@ -314,34 +306,36 @@ void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* n
         FBXSharedMeshInfo* smInfo = 0;
         FBXMeshToInfoMap::iterator it = fbxMeshToInfoMap.find(mesh);
 
-		if (it != fbxMeshToInfoMap.end())
-		{
-			smInfo = &it->second;
-			// this mesh is an instance but might have different materials than its prototype.
-			//if (settings.importMaterials)
-			//{
-			//	const std::string meshName = static_cast<const char*>(node->GetNameWithoutNameSpacePrefix());
-			//	FBXImportMesh importMesh;
-			//	ConvertFBXMeshMaterials(fbxManager, fbxScene, *node, *mesh, meshName, importMesh, scene, mesh->GetPolygonCount(), gIsBrokenLightwaveFile, fbxMaterialLookup);
-			//	scene.meshInstanceMaterialInfos.insert(std::make_pair(&outNode, importMesh.materials));
-			//}
-		}
-		else
-		{
-			const int meshIndex = (int)scene.meshes.size();
+        if (it != fbxMeshToInfoMap.end())
+        {
+            smInfo = &it->second;
+            // this mesh is an instance but might have different materials than its prototype.
+            //if (settings.importMaterials)
+            //{
+            //	const std::string meshName = static_cast<const char*>(node->GetNameWithoutNameSpacePrefix());
+            //	FBXImportMesh importMesh;
+            //	ConvertFBXMeshMaterials(fbxManager, fbxScene, *node, *mesh, meshName, importMesh, scene, mesh->GetPolygonCount(), gIsBrokenLightwaveFile, fbxMaterialLookup);
+            //	scene.meshInstanceMaterialInfos.insert(std::make_pair(&outNode, importMesh.materials));
+            //}
+        }
+        else
+        {
+            const int meshIndex = (int)scene.meshes.size();
 
-			std::pair<FBXMeshToInfoMap::iterator, bool> itInsert = fbxMeshToInfoMap.insert(std::make_pair(mesh, FBXSharedMeshInfo()));
-			
-			smInfo = &itInsert.first->second;
-			smInfo->index = meshIndex;
+            std::pair<FBXMeshToInfoMap::iterator, bool> itInsert = fbxMeshToInfoMap.insert(std::make_pair(mesh, FBXSharedMeshInfo()));
 
-			scene.meshes.push_back(FBXImportMesh());
-			ConvertFBXMesh(*mesh, fbxManager, fbxScene, node, scene.meshes.back(), scene, fbxMaterialLookup);
-		}
+            smInfo = &itInsert.first->second;
+            smInfo->index = meshIndex;
 
-		smInfo->usedByNodes.push_back(node);
-		outNode.meshIndex = smInfo->index;
+            scene.meshes.push_back(FBXImportMesh());
+            ConvertFBXMesh(*mesh, fbxManager, fbxScene, node, scene.meshes.back(), scene, fbxMaterialLookup);
+        }
+
+        smInfo->usedByNodes.push_back(node);
+        outNode.meshIndex = smInfo->index;
     }
+    else
+        outNode.meshIndex = -1;
 
 	if (settings.importCameras || settings.importLights)
 		ConvertComponents(node, outNode, scene, settings);

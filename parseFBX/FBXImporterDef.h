@@ -362,6 +362,7 @@ struct FBXImportNode
 	int         lightIndex;
 	int         meshIndex;// -1 default
 	bool        visibility;
+	bool		isBone;
 	std::vector<FBXImportNode> children;
 
 	std::vector<FBXImportNodeUserData> userData;
