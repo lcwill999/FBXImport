@@ -26,10 +26,7 @@ void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& p
 	path2name.insert(std::pair<std::string, std::string>(NodePath, NodeName));
 	for (auto i = 0; i < node.children.size(); i++)
 	{
-		if(node.isBone)
-			BuildBoneNameMap(node.children[i], path2name, NodePath);
-		else
-			BuildBoneNameMap(node.children[i], path2name, "");
+		BuildBoneNameMap(node.children[i], path2name, NodePath);
 	}
 }
 
