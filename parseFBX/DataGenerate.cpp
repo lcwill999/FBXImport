@@ -46,17 +46,16 @@ void BuildAllBoneNameMap(FBXImportScene& scene)
 	}
 	else if (allnodes.size() == 1)
 	{
-		BuildBoneNameMap(allnodes[0], gNodePath2Name);
-		//std::vector<FBXImportNode> root = allnodes[0].children;
-		//if (allnodes[0].name == UNITY_BONE_ROOT)
-		//{
-		//	root = allnodes;
-		//}
-		//root = allnodes;
-		//for (auto i = 0; i < root.size(); i++)
-		//{
-		//	BuildBoneNameMap(root[i], gNodePath2Name);
-		//}
+		std::vector<FBXImportNode> root = allnodes[0].children;
+		if (allnodes[0].name == UNITY_BONE_ROOT)
+		{
+			root = allnodes;
+		}
+
+		for (auto i = 0; i < root.size(); i++)
+		{
+			BuildBoneNameMap(root[i], gNodePath2Name);
+		}
 	}
 }
 
@@ -487,14 +486,14 @@ void RenameFileToWide(const std::string& originalName, const std::wstring& newNa
 
 		// 首先尝试直接移动文件
 		if (MoveFileExW(wideOriginalName.c_str(), newName.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-			//wprintf(L"File renamed successfully to: %ls\n", newName.c_str());
+			wprintf(L"File renamed successfully to: %ls\n", newName.c_str());
 		}
 		else {
 			DWORD error = GetLastError();
 			if (error == ERROR_NOT_SAME_DEVICE) {
 				if (CopyFileW(wideOriginalName.c_str(), newName.c_str(), FALSE)) {
 					if (DeleteFileW(wideOriginalName.c_str())) {
-						//wprintf(L"File copied and original deleted successfully to: %ls\n", newName.c_str());
+						wprintf(L"File copied and original deleted successfully to: %ls\n", newName.c_str());
 					}
 					else {
 						wprintf(L"File copied but failed to delete original, error code: %d\n", GetLastError());
