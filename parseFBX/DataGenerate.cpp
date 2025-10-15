@@ -16,6 +16,7 @@ std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
 std::map<std::string, std::string> gBlendShapeMesh2Bone;
 std::string gOutPutDir;
 std::string gOutPutDirSantinized;
+bool gOutPutTangent = true;
 
 void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& path2name, std::string parentpath)
 {
@@ -294,7 +295,14 @@ void BuildMeshHead(FBXMesh& meshData, message::UGCResSkinnedMeshExtData& extData
 	body.NormalHeadLength = 8;
 	body.NormalLength = meshData.normals.size();
 
-	body.UV1Pos += body.NormalPos + body.NormalHeadLength + body.NormalLength * sizeof(Vector3f);
+	body.TangentPos += body.NormalPos + body.NormalHeadLength + body.NormalLength * sizeof(Vector3f);
+	body.TangentHeadLength = 8;
+	if (gOutPutTangent)
+		body.TangentLength = meshData.tangents.size();
+	else
+		body.TangentLength = 0;
+
+	body.UV1Pos += body.TangentPos + body.TangentHeadLength + body.TangentLength * sizeof(Vector4f);
 	body.UV1HeadLength = 8;
 	body.UV1Length = meshData.uv1.size();
 
@@ -337,6 +345,11 @@ void BuildMeshHead(FBXMesh& meshData, message::UGCResSkinnedMeshExtData& extData
 	head.MagicNumber3 = 157;
 	head.MagicNumber4 = 136;
 	head.Version = 1009715;
+	unsigned char* p = (unsigned char*)&head.Version;
+	p[0] = 1;
+	p[1] = 1;
+	p[2] = 1;
+	p[3] = 1;
 	
 	osData.write(reinterpret_cast<char*>(&head.MagicNumber1), sizeof(byte));
 	osData.write(reinterpret_cast<char*>(&head.MagicNumber2), sizeof(byte));
@@ -363,6 +376,10 @@ void BuildMeshBody(FBXMesh& meshData, MeshBody& bodyinfo, std::ofstream& osData)
 
 	osData.write(reinterpret_cast<char*>(&bodyinfo.NormalLength), 8);
 	osData.write(reinterpret_cast<char*>(meshData.normals.data()), bodyinfo.NormalLength * sizeof(Vector3f));
+
+	osData.write(reinterpret_cast<char*>(&bodyinfo.TangentLength), 8);
+	if(gOutPutTangent)
+		osData.write(reinterpret_cast<char*>(meshData.tangents.data()), bodyinfo.TangentLength * sizeof(Vector4f));
 
 	osData.write(reinterpret_cast<char*>(&bodyinfo.UV1Length), 8);
 	osData.write(reinterpret_cast<char*>(meshData.uv1.data()), bodyinfo.UV1Length * sizeof(Vector2f));

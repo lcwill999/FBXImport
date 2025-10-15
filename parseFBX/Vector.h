@@ -1,6 +1,9 @@
 #pragma once
+#define NOMINMAX  // 避免 Windows 头文件中的 min/max 宏定义
 #include "floatConversion.h"
 #include "stringFormat.h"
+#include <cmath>
+#include <algorithm>
 struct Vector4f
 {
 public:
@@ -16,7 +19,7 @@ public:
 	float x, y, z;
 	Vector3f() {}
 	Vector3f(float u, float v, float w) { x = u; y = v; z = w; }
-	float& operator[](int i) //Ӧ����һ��Assert
+	float& operator[](int i) 
 	{
 		return (&x)[i];
 	}
@@ -60,7 +63,9 @@ inline Vector3f operator/(const Vector3f& inV, const float s) { Vector3f temp(in
 inline Vector3f Inverse(const Vector3f& inVec) { return Vector3f(1.0F / inVec.x, 1.0F / inVec.y, 1.0F / inVec.z); }
 inline float SqrMagnitude(const Vector3f& inV) { return Dot(inV, inV); }
 inline float Magnitude(const Vector3f& inV) { return SqrtImpl(Dot(inV, inV)); }
-
+inline float Angle(const Vector3f& lhs, const Vector3f& rhs) {
+	return std::acos((std::min)(1.0f, (std::max)(-1.0f, Dot(lhs, rhs) / (Magnitude(lhs) * Magnitude(rhs)))));
+}
 inline static Vector3f NormalizeRobustInternal(const Vector3f& a, float& l, float& div, float eps)
 {
 	float a0, a1, a2, aa0, aa1, aa2;

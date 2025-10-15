@@ -22,6 +22,206 @@ static std::string gFBXFileName = "";
 static float gGlobalScale = 1.0f;
 
 
+class ConnectedMesh
+{
+public:
+    struct Vertex
+    {
+        UInt32* faces;
+        int  faceCount;
+    };
+
+    struct Edge
+    {
+        UInt32 faces[2];
+        SInt8 edgeNos[2];
+    };
+
+    enum { kInvalidEdgeIndex = 0xFFFFFFFF };
+
+    /// The list of faces per vertex
+    std::vector<Vertex> vertices;
+    /// The list of vertices per face
+    std::vector<std::vector<UInt32> > faces;
+
+    std::vector<Edge> edges;
+    std::vector<UInt32> edgeIndices;
+    std::vector<UInt32> faceOffsets;
+
+    ConnectedMesh(int vertexCount, const std::vector<UInt32>& indices, const std::vector<UInt32>& faceSizes);
+
+private:
+    void BuildVertexConnections(int vertexCount, const std::vector<UInt32>& indices, const std::vector<UInt32>& faceSizes);
+    void BuildEdgeInfo(const std::vector<UInt32>& indices, const std::vector<UInt32>& faceSizes);
+    void SortVertexFaceLists();
+    bool CheckWinding(const UInt32* faceIndices, UInt32 faceSize, UInt32 edgeVertIndex, UInt32 nextVertIndex, SInt8& outEdgeNo);
+
+
+    std::vector<UInt32> m_FaceBuffer;
+};
+
+ConnectedMesh::ConnectedMesh(int vertexCount, const std::vector<UInt32>& indices, const std::vector<UInt32>& faceSizes)
+{
+    BuildVertexConnections(vertexCount, indices, faceSizes);
+    BuildEdgeInfo(indices, faceSizes);
+}
+
+void ConnectedMesh::BuildVertexConnections(int vertexCount, const std::vector<UInt32>& indices, const std::vector<UInt32>& faceSizes)
+{
+    const int indexCount = indices.size();
+    const int faceCount = faceSizes.size();
+    Vertex temp; temp.faces = NULL; temp.faceCount = 0;
+    vertices.resize(vertexCount, temp);
+    m_FaceBuffer.resize(indexCount, 0);
+    faces.resize(faceCount);
+
+    // Count faces that use each vertex
+    for (int i = 0, idx = 0; i < faceCount; ++i)
+    {
+        const int fs = faceSizes[i];
+        for (int e = 0; e < fs; ++e)
+        {
+            vertices[indices[idx + e]].faceCount++;
+            faces[i].push_back(indices[idx + e]);
+        }
+        idx += fs;
+    }
+
+    // Assign memory to faces (reset faceCount - so we reuse it as a counter)
+    int bufferIdx = 0;
+
+    for (int i = 0; i < vertexCount; ++i)
+    {
+        vertices[i].faces = &m_FaceBuffer[bufferIdx];
+        bufferIdx += vertices[i].faceCount;
+        vertices[i].faceCount = 0;
+    }
+
+    // Assign vertex->face connections
+    for (int i = 0, idx = 0; i < faceCount; ++i)
+    {
+        const int fs = faceSizes[i];
+        for (int e = 0; e < fs; ++e)
+        {
+            int vertexIndex = indices[idx + e];
+            vertices[vertexIndex].faces[vertices[vertexIndex].faceCount] = i;
+            vertices[vertexIndex].faceCount++;
+        }
+        idx += fs;
+    }
+}
+
+void ConnectedMesh::BuildEdgeInfo(const std::vector<UInt32>& indices, const std::vector<UInt32>& faceSizes)
+{
+    const int indexCount = indices.size();
+    const int faceCount = faceSizes.size();
+
+    SortVertexFaceLists();
+
+    faceOffsets.resize(faceCount);
+    UInt32 faceOffset = 0;
+    for (int face = 0; face < faceCount; ++face)
+    {
+        faceOffsets[face] = faceOffset;
+        faceOffset += faceSizes[face];
+    }
+    //AssertMsg(faceOffset == indexCount, "Face sizes did not add up correctly");
+
+    // Expected number for a closed manifold
+    edges.reserve(indexCount);
+
+    // Edge index per input index
+    edgeIndices.resize(indexCount);
+    std::fill(edgeIndices.begin(), edgeIndices.end(), kInvalidEdgeIndex);
+
+    UInt32 edgeOffset = 0;
+    faceOffset = 0;
+    for (int face = 0; face < faceCount; ++face)
+    {
+        const UInt32 faceSize = faceSizes[face];
+        for (UInt32 e = 0; e < faceSize; ++e, ++edgeOffset)
+        {
+            if (edgeIndices[edgeOffset] != kInvalidEdgeIndex)
+                continue;
+
+            const UInt32 vertIndex1 = indices[faceOffset + e];
+            const UInt32 vertIndex2 = indices[faceOffset + (e + 1) % faceSize];
+            const Vertex& vert1 = vertices[vertIndex1];
+            const Vertex& vert2 = vertices[vertIndex2];
+            UInt32 vert1FaceIndex = 0;
+            UInt32 vert2FaceIndex = 0;
+            while (vert1FaceIndex < vert1.faceCount && vert2FaceIndex < vert2.faceCount)
+            {
+                if (vert1.faces[vert1FaceIndex] < vert2.faces[vert2FaceIndex])
+                    ++vert1FaceIndex;
+                else if (vert1.faces[vert1FaceIndex] > vert2.faces[vert2FaceIndex])
+                    ++vert2FaceIndex;
+                else
+                {
+                    const UInt32 otherFace = vert1.faces[vert1FaceIndex];
+                    const UInt32 otherFaceOffset = faceOffsets[otherFace];
+                    SInt8 otherEdgeNo;
+
+                    // Add this edge if second face index is bigger (so we don't add edges twice)
+                    // and both faces are facing the same direction (in case geometry is double-sided or has weird topology).
+                    // Also, double check that the other side wasn't somehow paired already.
+                    if (otherFace > face &&
+                        CheckWinding(&indices[faceOffsets[otherFace]], faceSizes[otherFace], vertIndex2, vertIndex1, otherEdgeNo) &&
+                        edgeIndices[otherFaceOffset + otherEdgeNo] == kInvalidEdgeIndex)
+                    {
+                        edgeIndices[edgeOffset] = edges.size();
+                        edgeIndices[otherFaceOffset + otherEdgeNo] = edges.size();
+                        Edge edge;
+                        edge.faces[0] = face;
+                        edge.faces[1] = otherFace;
+                        edge.edgeNos[0] = e;
+                        edge.edgeNos[1] = otherEdgeNo;
+                        edges.push_back(edge);
+                        break;
+                    }
+                    ++vert1FaceIndex;
+                    ++vert2FaceIndex;
+                }
+            }
+        }
+        faceOffset += faceSizes[face];
+    }
+}
+
+void ConnectedMesh::SortVertexFaceLists()
+{
+    int vertexCount = vertices.size();
+    for (int v = 0; v < vertexCount; ++v)
+    {
+        Vertex& vertex = vertices[v];
+        std::sort(vertex.faces, vertex.faces + vertex.faceCount);
+    }
+}
+
+bool ConnectedMesh::CheckWinding(const UInt32* faceIndices, UInt32 faceSize, UInt32 edgeVertIndex, UInt32 nextVertIndex, SInt8& outEdgeNo)
+{
+    for (UInt32 e = 0; e < faceSize; ++e)
+    {
+        if (faceIndices[e] == edgeVertIndex)
+        {
+            UInt32 eNext = (e + 1) < faceSize ? (e + 1) : 0;
+            if (faceIndices[eNext] == nextVertIndex)
+            {
+                outEdgeNo = SInt8(e);
+                return true;
+            }
+            UInt32 ePrev = e > 0 ? (e - 1) : (faceSize - 1);
+            if(faceIndices[ePrev] == nextVertIndex)
+                std::cout << "Next vertex not found in CheckWinding()" << std::endl;
+            //AssertMsg(faceIndices[ePrev] == nextVertIndex, "Next vertex not found in CheckWinding()");
+            return false;
+        }
+    }
+    std::cout << "Vertex not found in CheckWinding()" << std::endl;
+    //ErrorString("Vertex not found in CheckWinding()");
+    return false;
+}
+
 
 void ZeroPivotsForSkinsRecursive(FbxScene* scene, FbxNode* node)
 {
@@ -314,34 +514,36 @@ void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* n
         FBXSharedMeshInfo* smInfo = 0;
         FBXMeshToInfoMap::iterator it = fbxMeshToInfoMap.find(mesh);
 
-		if (it != fbxMeshToInfoMap.end())
-		{
-			smInfo = &it->second;
-			// this mesh is an instance but might have different materials than its prototype.
-			//if (settings.importMaterials)
-			//{
-			//	const std::string meshName = static_cast<const char*>(node->GetNameWithoutNameSpacePrefix());
-			//	FBXImportMesh importMesh;
-			//	ConvertFBXMeshMaterials(fbxManager, fbxScene, *node, *mesh, meshName, importMesh, scene, mesh->GetPolygonCount(), gIsBrokenLightwaveFile, fbxMaterialLookup);
-			//	scene.meshInstanceMaterialInfos.insert(std::make_pair(&outNode, importMesh.materials));
-			//}
-		}
-		else
-		{
-			const int meshIndex = (int)scene.meshes.size();
+        if (it != fbxMeshToInfoMap.end())
+        {
+            smInfo = &it->second;
+            // this mesh is an instance but might have different materials than its prototype.
+            //if (settings.importMaterials)
+            //{
+            //	const std::string meshName = static_cast<const char*>(node->GetNameWithoutNameSpacePrefix());
+            //	FBXImportMesh importMesh;
+            //	ConvertFBXMeshMaterials(fbxManager, fbxScene, *node, *mesh, meshName, importMesh, scene, mesh->GetPolygonCount(), gIsBrokenLightwaveFile, fbxMaterialLookup);
+            //	scene.meshInstanceMaterialInfos.insert(std::make_pair(&outNode, importMesh.materials));
+            //}
+        }
+        else
+        {
+            const int meshIndex = (int)scene.meshes.size();
 
-			std::pair<FBXMeshToInfoMap::iterator, bool> itInsert = fbxMeshToInfoMap.insert(std::make_pair(mesh, FBXSharedMeshInfo()));
-			
-			smInfo = &itInsert.first->second;
-			smInfo->index = meshIndex;
+            std::pair<FBXMeshToInfoMap::iterator, bool> itInsert = fbxMeshToInfoMap.insert(std::make_pair(mesh, FBXSharedMeshInfo()));
 
-			scene.meshes.push_back(FBXImportMesh());
-			ConvertFBXMesh(*mesh, fbxManager, fbxScene, node, scene.meshes.back(), scene, fbxMaterialLookup);
-		}
+            smInfo = &itInsert.first->second;
+            smInfo->index = meshIndex;
 
-		smInfo->usedByNodes.push_back(node);
-		outNode.meshIndex = smInfo->index;
+            scene.meshes.push_back(FBXImportMesh());
+            ConvertFBXMesh(*mesh, fbxManager, fbxScene, node, scene.meshes.back(), scene, fbxMaterialLookup);
+        }
+
+        smInfo->usedByNodes.push_back(node);
+        outNode.meshIndex = smInfo->index;
     }
+    else
+        outNode.meshIndex = -1;
 
 	if (settings.importCameras || settings.importLights)
 		ConvertComponents(node, outNode, scene, settings);
@@ -621,6 +823,17 @@ struct SplitMeshImplementation
         if (!srcMesh.tangents.empty())
             dstMesh.tangents[dstIndex] = srcMesh.tangents[wedgeIndex];
 
+        for (size_t i = 0; i < srcMesh.shapes.size(); ++i)
+        {
+            const FBXImportBlendShape& srcShape = srcMesh.shapes[i];
+            FBXImportBlendShape& dstShape = dstMesh.shapes[i];
+
+            if (!srcShape.normals.empty())
+                dstShape.normals[dstIndex] = srcShape.normals[wedgeIndex];
+            if (!srcShape.tangents.empty())
+                dstShape.tangents[dstIndex] = srcShape.tangents[wedgeIndex];
+        }
+
     }
 
     void AddVertexByIndex(const FBXImportMesh& srcMesh, FBXImportMesh& dstMesh, int srcVertexIndex)
@@ -668,7 +881,17 @@ struct SplitMeshImplementation
                 return true;
         if (!srcMesh.tangents.empty() && NeedTangentSplit(srcMesh.tangents[srcIndex], dstMesh.tangents[dstIndex]))
             return true;
+        for (size_t i = 0; i < srcMesh.shapes.size(); ++i)
+        {
+            const FBXImportBlendShape& srcShape = srcMesh.shapes[i];
+            const FBXImportBlendShape& dstShape = dstMesh.shapes[i];
 
+            if (!srcShape.normals.empty() && Dot(srcShape.normals[srcIndex], dstShape.normals[dstIndex]) < normalDotAngle)
+                return true;
+
+            if (!srcShape.tangents.empty() && Dot(srcShape.tangents[srcIndex], dstShape.tangents[dstIndex]) < normalDotAngle)
+                return true;
+        }
         return false;
     }
 
@@ -846,6 +1069,471 @@ static void FillLodMeshData(const FBXImportMesh& splitMesh, FBXMesh& lodMesh, st
     }
 }
 
+int WrapIndex(int value, int modulo)
+{
+    if (value < 0)
+        value += modulo;
+    if (value >= modulo)
+        value -= modulo;
+    //AssertMsg(value >= 0 && value < modulo, "Value in WrapIndex() was outside expected range");
+    return value;
+}
+
+inline Vector3f RobustNormalFromFace(const Vector3f* vertices, const UInt32* face, int faceSize)
+{
+    const int kMaxFaceSize = 4;
+
+    if (faceSize < 3 || faceSize > kMaxFaceSize)
+    {
+        DebugAssertFormatMsg(false, "Invalid faceSize (%d) in RobustNormalFromFace", faceSize);
+        return Vector3f::zero;
+    }
+
+    faceSize = (std::min)(faceSize, kMaxFaceSize);
+
+    // Both the cross product and Newell's method are very sensitive to the input range,
+    // so shift and scale input positions to [0-1] range for robustness.
+    // Alternatively we would need to use doubles and smaller epsilons, which is harder
+    // to get consistent across different platforms.
+    Vector3f normVerts[kMaxFaceSize];
+    for (int v = 0; v < faceSize; ++v)
+        normVerts[v] = vertices[face[v]];
+    
+    Vector3f minPos = normVerts[0];
+    Vector3f maxPos = normVerts[0];
+    for (int v = 1; v < faceSize; ++v)
+    {
+        minPos.x = (std::min)(minPos.x, normVerts[v].x);
+        minPos.y = (std::min)(minPos.y, normVerts[v].y);
+        minPos.z = (std::min)(minPos.z, normVerts[v].z);
+        maxPos.x = (std::max)(maxPos.x, normVerts[v].x);
+        maxPos.y = (std::max)(maxPos.y, normVerts[v].y);
+        maxPos.z = (std::max)(maxPos.z, normVerts[v].z);
+    }
+    
+    const float kEpsilon = 0.000001f;
+    Vector3f range = maxPos - minPos;
+    float maxRange = (std::max)((std::max)(range.x, range.y), range.z);
+    float scale = (maxRange > kEpsilon) ? (1.0f / maxRange) : 1.0f;
+    
+    for (int v = 0; v < faceSize; ++v)
+        normVerts[v] = (normVerts[v] - minPos) * scale;
+
+    Vector3f normal = Vector3f::zero;
+    if (faceSize > 3)
+    {
+        // Use Newell's method for polygons
+        for (int v = 0; v < faceSize; ++v)
+        {
+            const Vector3f& curVert = normVerts[v];
+            const Vector3f& nextVert = normVerts[WrapIndex(v + 1, faceSize)];
+            Vector3f curYZX(curVert.y, curVert.z, curVert.x);
+            Vector3f nextYZX(nextVert.y, nextVert.z, nextVert.x);
+            Vector3f curZXY(curVert.z, curVert.x, curVert.y);
+            Vector3f nextZXY(nextVert.z, nextVert.x, nextVert.y);
+            normal += Cross(curYZX - nextYZX, curZXY + nextZXY);
+        }
+    }
+    else
+    {
+        // Use cross product for triangles
+        normal = Cross(normVerts[1] - normVerts[0], normVerts[2] - normVerts[0]);
+    }
+
+    float sqrLen = Dot(normal, normal);
+    const float kSqrLenEpsilon = 0.00001f * 0.00001f;
+    if (sqrLen > kSqrLenEpsilon)
+    {
+        float invSqrtLen = 1.0f / std::sqrt(sqrLen);
+        normal = normal * invSqrtLen;
+    }
+    else
+    {
+        normal = Vector3f::zero;
+    }
+    
+    return normal;
+}
+inline Vector3f RobustNormalFromFace_Legacy(const Vector3f* vertices, const UInt32* face, int faceSize)
+{
+    DebugAssert(faceSize == 3 || faceSize == 4);
+
+    // For a triangle, cross of two edges. For a quad, cross of two diagonals.
+    // So one edge is v1-(quad?v3:v0), another is v2-v0
+    Vector3f ea = vertices[face[1]] - vertices[face[faceSize == 4 ? 3 : 0]];
+    Vector3f eb = vertices[face[2]] - vertices[face[0]];
+    Vector3f n = Cross(ea, eb);
+    return NormalizeRobust(n);
+}
+inline float ComputeFaceArea(const std::vector<Vector3f>& vertices, const UInt32* face, int faceSize)
+{
+    DebugAssert(faceSize == 3 || faceSize == 4);
+
+    // For a triangle, cross of two edges. For a quad, cross of two diagonals.
+    // So one edge is v1-(quad?v3:v0), another is v2-v0
+    Vector3f ea = vertices[face[1]] - vertices[face[faceSize == 4 ? 3 : 0]];
+    Vector3f eb = vertices[face[2]] - vertices[face[0]];
+    Vector3f n = Cross(ea, eb);
+
+    // The weight is the surface area of the polygon (or more specifically, twice the surface area).
+    // Conveniently, the surface area of a triangle is half the cross product magnitude of two sides,
+    // while and the surface area of a quad is half the cross product magnitude of the two diagonals.
+    // Since weights only have effect relative to other weights, we don't need to divide by two.
+    return Magnitude(n);
+}
+
+
+
+void GenerateFaceNormals(const FBXImportMesh& mesh, const std::vector<Vector3f>& vertices, std::vector<Vector3f>& outFaceNormals)
+{
+    const int faceCount = mesh.polygonSizes.size();
+    for (int i = 0, idx = 0; i < faceCount; ++i)
+    {
+        int fs = mesh.polygonSizes[i];
+        const UInt32* face = &mesh.polygons[idx];
+        Vector3f normal = RobustNormalFromFace(&vertices[0], face, fs);
+        outFaceNormals[i] = normal;
+        idx += fs;
+    }
+}
+
+void ClassifySmoothEdgesFromSmoothingGroups(const ConnectedMesh& meshConnection, const std::vector<int>& smoothingGroups, dynamic_bitset& outSmoothEdges)
+{
+    for (size_t e = 0; e < meshConnection.edges.size(); ++e)
+    {
+        const ConnectedMesh::Edge& edge = meshConnection.edges[e];
+
+        const UInt32 face1Index = meshConnection.faces[edge.faces[0]][edge.edgeNos[0]];
+        const UInt32 face2Index = meshConnection.faces[edge.faces[1]][edge.edgeNos[1]];
+
+        outSmoothEdges[e] = smoothingGroups[face1Index] & smoothingGroups[face2Index];
+    }
+}
+
+void ClassifySmoothEdgesFromAngle(const ConnectedMesh& meshConnection, const std::vector<Vector3f>& faceNormals, const float hardAngle, dynamic_bitset& outSmoothEdges)
+{
+    const float hardDot = cos(Deg2Rad(hardAngle)) - 0.001F; // NOTE: subtract is for more consistent results across platforms
+
+    for (size_t e = 0; e < meshConnection.edges.size(); ++e)
+    {
+        const ConnectedMesh::Edge& edge = meshConnection.edges[e];
+        const Vector3f& faceNormal1 = faceNormals[edge.faces[0]];
+        const Vector3f& faceNormal2 = faceNormals[edge.faces[1]];
+        const float dp = Dot(faceNormal1, faceNormal2);
+        outSmoothEdges[e] = (dp > hardDot);
+    }
+}
+
+void ComputeAreaWeights(const FBXImportMesh& mesh, const std::vector<Vector3f>& vertices, std::vector<float>& outFaceAreaWeights)
+{
+    const int faceCount = mesh.polygonSizes.size();
+    for (int i = 0, idx = 0; i < faceCount; ++i)
+    {
+        int faceSize = mesh.polygonSizes[i];
+        const UInt32* face = &mesh.polygons[idx];
+        float weight = ComputeFaceArea(vertices, face, faceSize);
+        outFaceAreaWeights[i] = weight;
+        idx += faceSize;
+    }
+}
+
+void ComputeAngleWeights(const size_t indexCount, const size_t faceCount, const FBXImportMesh& mesh, std::vector<float>& angles)
+{
+    for (size_t face = 0, faceOffset = 0; face < faceCount; ++face)
+    {
+        const UInt32 faceSize = mesh.polygonSizes[face];
+        UInt32 prevVertexIndex = mesh.polygons[faceOffset + faceSize - 1];
+        for (UInt32 v = 0; v < faceSize; ++v)
+        {
+            UInt32 vertexIndex = mesh.polygons[faceOffset + v];
+            UInt32 nextVertexIndex = mesh.polygons[faceOffset + WrapIndex(v + 1, faceSize)];
+            const Vector3f vecToPrevVertex = mesh.vertices[prevVertexIndex] - mesh.vertices[vertexIndex];
+            const Vector3f vecToNextVertex = mesh.vertices[nextVertexIndex] - mesh.vertices[vertexIndex];
+            angles[faceOffset + v] = Angle(vecToPrevVertex, vecToNextVertex);
+            prevVertexIndex = vertexIndex;
+        }
+        faceOffset += faceSize;
+    }
+}
+
+
+void ComputeNormals(const size_t indexCount,
+    const size_t faceCount,
+    const FBXImportMesh& mesh,
+    const std::vector<float>& angleWeights,
+    const std::vector<Vector3f>& faceNormals,
+    const std::vector<float>& faceAreaWeights,
+    const ConnectedMesh& meshConnection,
+    const dynamic_bitset& smoothEdges,
+    std::vector<Vector3f>& outNormals)
+{
+    const UInt32 kNotComputed = ~UInt32(0);
+    UInt32 indexOffset = 0;
+    std::vector<UInt32> alreadyComputed(indexCount, kNotComputed);
+    for (size_t face = 0, faceOffset = 0; face < faceCount; ++face)
+    {
+        const UInt32 faceSize = mesh.polygonSizes[face];
+        for (UInt32 v = 0; v < faceSize; ++v, ++indexOffset)
+        {
+            if (alreadyComputed[indexOffset] != kNotComputed)
+            {
+                // Take already computed result as an optimization and to avoid numerical differences
+                // for normals that should be identical (because they were added up in different order)
+                outNormals[indexOffset] = outNormals[alreadyComputed[indexOffset]];
+                continue;
+            }
+
+            // Contribution from first face normal
+            const UInt32 vertexIndex = mesh.polygons[faceOffset + v];
+            const float angleWeight = angleWeights[faceOffset + v];
+            Vector3f normalSum = faceNormals[face] * angleWeight * faceAreaWeights[face];
+
+            // Loop around vertex in both directions until hitting a hard edge or completing the loop
+            bool vertexCompleted = false;
+            for (int clockwise = 0; !vertexCompleted && clockwise < 2; ++clockwise)
+            {
+                const UInt32 startEdgeIndex = meshConnection.edgeIndices[faceOffset + WrapIndex(int(v) - clockwise, faceSize)];
+                UInt32 curFace = face;
+                UInt32 curEdgeIndex = startEdgeIndex;
+                while (!vertexCompleted && curEdgeIndex != ConnectedMesh::kInvalidEdgeIndex)
+                {
+                    if (!smoothEdges[curEdgeIndex])
+                        break;
+
+                    const ConnectedMesh::Edge& edge = meshConnection.edges[curEdgeIndex];
+                    for (size_t side = 0; side < 2; ++side)
+                    {
+                        if (edge.faces[side] != curFace)
+                        {
+                            curFace = edge.faces[side];
+                            if (curFace == face)
+                            {
+                                // We're back to where we started, don't walk in opposite direction
+                                vertexCompleted = true;
+                                break;
+                            }
+                            const UInt32 curFaceOffset = meshConnection.faceOffsets[curFace];
+                            const UInt32 curFaceSize = mesh.polygonSizes[curFace];
+                            const int curVertNo = WrapIndex(edge.edgeNos[side] + (clockwise ? 0 : 1), curFaceSize);
+                            //AssertMsg(mesh.polygons[curFaceOffset + curVertNo] == vertexIndex, "Unexpected vertex index while generating normals");
+
+                            // Add contribution from face normal, mark current index as already computed
+                            const UInt32 curIndexOffset = curFaceOffset + curVertNo;
+                            const float curAngleWeight = angleWeights[curIndexOffset];
+                            normalSum += faceNormals[curFace] * curAngleWeight * faceAreaWeights[curFace];
+                            alreadyComputed[curIndexOffset] = indexOffset;
+
+                            // Step to next triangle edge surrounding vertex
+                            int edgeNo = WrapIndex(int(edge.edgeNos[side]) + (clockwise ? -1 : 1), curFaceSize);
+                            curEdgeIndex = meshConnection.edgeIndices[curFaceOffset + edgeNo];
+                            break;
+                        }
+                    }
+                }
+            }
+            outNormals[indexOffset] = NormalizeRobust(normalSum);
+        }
+        faceOffset += faceSize;
+    }
+
+    for (size_t i = 0; i < indexCount; ++i)
+    {
+        outNormals[i] = NormalizeRobust(outNormals[i]);
+    }
+}
+
+void ComputeNormals_Legacy(const size_t indexCount,
+    const size_t faceCount,
+    const FBXImportMesh& mesh,
+    const std::vector<Vector3f>& vertices,
+    const ConnectedMesh& meshConnection,
+    const float hardAngle,
+    std::vector<Vector3f>& outNormals)
+{
+    // generate the face normals using the legacy functions, since the SIMD function RobustNormalFromFace
+    // produces slightly different results which can fail the asset import tests
+    std::vector<Vector3f> faceNormals(faceCount);
+    for (int i = 0, idx = 0; i < faceCount; ++i)
+    {
+        int fs = mesh.polygonSizes[i];
+        const UInt32* face = &mesh.polygons[idx];
+        const Vector3f& normal = RobustNormalFromFace_Legacy(&vertices[0], face, fs);
+        faceNormals[i] = normal;
+        idx += fs;
+    }
+
+    float hardDot = cos(Deg2Rad(hardAngle)) - 0.001F; // NOTE: subtract is for more consistent results across platforms
+
+    for (int faceIdx = 0, idx = 0; faceIdx < faceCount; ++faceIdx)
+    {
+        const int faceSize = mesh.polygonSizes[faceIdx];
+        const UInt32* face = &mesh.polygons[idx];
+        const Vector3f& faceNormal = faceNormals[faceIdx];
+        for (int vertexIdx = 0; vertexIdx < faceSize; ++vertexIdx)
+        {
+            Vector3f calculateNormal = Vector3f::zero;
+
+            const ConnectedMesh::Vertex& connected = meshConnection.vertices[face[vertexIdx]];
+            for (int connectedFaceIdx = 0; connectedFaceIdx < connected.faceCount; ++connectedFaceIdx)
+            {
+                const Vector3f& connectedFaceNormal = faceNormals[connected.faces[connectedFaceIdx]];
+                float dp = Dot(faceNormal, connectedFaceNormal);
+                if (dp > hardDot)
+                {
+                    calculateNormal += connectedFaceNormal;
+                }
+            }
+
+            outNormals[idx + vertexIdx] = NormalizeRobust(calculateNormal);
+        }
+        idx += faceSize;
+    }
+}
+
+
+static void GenerateNormals(const FBXImportMesh& mesh,
+    const std::vector<Vector3f>& vertices,
+    NormalSmoothingSourceOptions normalSmoothingSource,
+    const float hardAngle,
+    NormalCalculationOptions normalCalculationMode,
+    std::vector<Vector3f>& normals)
+{
+    ConnectedMesh meshConnection(mesh.vertices.size(), mesh.polygons, mesh.polygonSizes);
+
+    const size_t indexCount = mesh.polygons.size();
+    const size_t faceCount = mesh.polygonSizes.size();
+    const size_t edgeCount = meshConnection.edges.size();
+
+    normals.resize(indexCount);
+    std::fill(normals.begin(), normals.end(), Vector3f(0, 0, 0));
+
+    if (normalCalculationMode != kNormalCalculationOptionsUnweighted_Legacy)
+    {
+        std::vector<Vector3f> faceNormals(faceCount);
+        GenerateFaceNormals(mesh, vertices, faceNormals);
+
+        dynamic_bitset smoothEdges(edgeCount, 0);
+        if (normalSmoothingSource == kNormalSmoothingSourceOptionsFromSmoothingGroups || (normalSmoothingSource == kNormalSmoothingSourceOptionsPreferSmoothingGroups && !mesh.smoothingGroups.empty()))
+        {
+            if (!mesh.smoothingGroups.empty())
+                ClassifySmoothEdgesFromSmoothingGroups(meshConnection, mesh.smoothingGroups, smoothEdges);
+        }
+        else if (normalSmoothingSource == kNormalSmoothingSourceOptionsFromAngle || (normalSmoothingSource == kNormalSmoothingSourceOptionsPreferSmoothingGroups && mesh.smoothingGroups.empty()))
+        {
+            ClassifySmoothEdgesFromAngle(meshConnection, faceNormals, hardAngle, smoothEdges);
+        }
+
+        // initialize the angles and area weights to 1.0f so we can use the same normal computation function for all types of weighted/unweighted normals
+        std::vector<float> angleWeights(indexCount, 1.0f);
+        std::vector<float> faceAreaWeights(faceCount, 1.0f);
+
+        switch (normalCalculationMode)
+        {
+        case kNormalCalculationOptionsAreaWeighted:
+            ComputeAreaWeights(mesh, vertices, faceAreaWeights);
+            break;
+        case kNormalCalculationOptionsAngleWeighted:
+            ComputeAngleWeights(indexCount, faceCount, mesh, angleWeights);
+            break;
+        case kNormalCalculationOptionsAreaAndAngleWeighted:
+            ComputeAreaWeights(mesh, vertices, faceAreaWeights);
+            ComputeAngleWeights(indexCount, faceCount, mesh, angleWeights);
+            break;
+        case kNormalCalculationOptionsUnweighted:
+        default:
+            break;
+        }
+
+        ComputeNormals(indexCount, faceCount, mesh, angleWeights, faceNormals, faceAreaWeights, meshConnection, smoothEdges, normals);
+    }
+    else
+    {
+        ComputeNormals_Legacy(indexCount, faceCount, mesh, vertices, meshConnection, hardAngle, normals);
+    }
+}
+
+
+static void GenerateNormals(FBXImportMesh& mesh, NormalSmoothingSourceOptions normalSmoothingSource, const float hardAngle, NormalCalculationOptions normalCalculationMode)
+{
+    GenerateNormals(mesh, mesh.vertices, normalSmoothingSource, hardAngle, normalCalculationMode, mesh.normals);
+
+    // Generate normals for blendShapes
+    for (int i = 0; i < mesh.shapes.size(); ++i)
+    {
+        FBXImportBlendShape& shape = mesh.shapes[i];
+        if (!shape.vertices.empty())
+            GenerateNormals(mesh, shape.vertices, normalSmoothingSource, hardAngle, normalCalculationMode, shape.normals);
+    }
+}
+
+void CalulateNormals(FBXImportMesh& tmpMesh,FBXImportMeshSetting& settings)
+{
+    if (settings.normalImportMode == kNormalOptionsNone)
+    {
+        if (!tmpMesh.normals.empty())
+        {
+            //AssertString(Format("Mesh %s should have no normals", meshName.c_str()));
+            tmpMesh.normals.clear();
+
+            // Make sure shapes have also no normals.
+            for (int i = 0; i < tmpMesh.shapes.size(); ++i)
+            {
+                FBXImportBlendShape& shape = tmpMesh.shapes[i];
+
+                if (!shape.normals.empty())
+                {
+                    //AssertString(Format("Shape #%d of mesh %s shouldn't have normals", i, meshName.c_str()));
+                    shape.normals.clear();
+                }
+            }
+        }
+    }
+    else
+    {
+        if (settings.legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes)
+        {
+            const bool normalCountMismatch = tmpMesh.normals.size() != tmpMesh.polygons.size();
+
+            if (settings.normalImportMode == kNormalOptionsCalculate || normalCountMismatch)
+            {
+                // only need to clean up early if normals are missing. Otherwise mikktspace
+                // prefers the mesh has not been subject to changes before tangent space generation.
+                CleanUpMesh(tmpMesh);
+
+                // Legacy: recompute ALL normals, including blendshape normals
+                GenerateNormals(tmpMesh, kNormalSmoothingSourceOptionsFromAngle, settings.normalSmoothAngle, settings.normalCalculationMode);
+            }
+        }
+        else
+        {
+            const bool normalCountMismatch = tmpMesh.normals.size() != tmpMesh.polygons.size();
+
+            if (settings.normalImportMode == kNormalOptionsCalculate || normalCountMismatch)
+            {
+                // only need to clean up early if normals are missing. Otherwise mikktspace
+                // prefers the mesh has not been subject to changes before tangent space generation.
+                CleanUpMesh(tmpMesh);
+
+                GenerateNormals(tmpMesh, tmpMesh.vertices, settings.normalSmoothingSource, settings.normalSmoothAngle, settings.normalCalculationMode,
+                    tmpMesh.normals);
+            }
+
+            for (int i = 0; i < tmpMesh.shapes.size(); ++i)
+            {
+                FBXImportBlendShape& shape = tmpMesh.shapes[i];
+
+                const bool normalCountMismatch = tmpMesh.normals.size() != shape.normals.size();
+
+                if (settings.blendShapeNormalImportMode == kNormalOptionsCalculate || (settings.blendShapeNormalImportMode == kNormalOptionsImport && normalCountMismatch))
+                {
+                    GenerateNormals(tmpMesh, shape.vertices, settings.normalSmoothingSource, settings.normalSmoothAngle,
+                        settings.normalCalculationMode, shape.normals);
+                }
+            }
+        }
+    }
+}
+
 void GenerateMeshData(const FBXImportMesh& constantMesh, const Matrix4x4f& transform, const std::string& lodMeshName, FBXMesh& lodMesh, 
     std::vector<int>& lodMeshMaterials, char* outdir)
 {
@@ -857,7 +1545,14 @@ void GenerateMeshData(const FBXImportMesh& constantMesh, const Matrix4x4f& trans
     importmeshsetting1.importTangent = false;
 
     Triangulate(*currentMesh, tmpMesh, importmeshsetting1, true);
-    InvertWinding(tmpMesh); 
+    InvertWinding(tmpMesh);
+
+
+    //ReGenerate Normals while missing
+    CalulateNormals(tmpMesh, importmeshsetting1);
+    //CreateTangent if need
+
+
     if(!tmpMesh.normals.empty())
         GenerateMikkTSpace(tmpMesh);  
     FBXImportMesh originalMesh;
@@ -1183,6 +1878,10 @@ void SplitParameter(char* parameter)
         {
             gGlobalScale = atof(pResult[1].c_str());
         }
+        if (pResult[0] == "disabletangent")
+        {
+            gOutPutTangent = false;
+        }
     }
 }
 
@@ -1203,6 +1902,7 @@ void ParseFBX(char* fbxpath, char* outdir, char* paramater)
 	gFBXFileName = ImgName.substr(0, ImgName.rfind("."));
 	
     SplitParameter(paramater);
+
     if (!lFilePath.IsEmpty())
     {
         bool lResult = LoadScene(lSdkManager, lScene, lFilePath.Buffer());
@@ -1274,6 +1974,10 @@ void SplitParameterW(const wchar_t* parameter)
         {
             gGlobalScale = atof(pResult[1].c_str());
         }
+        if (pResult[0] == "disabletangent")
+        {
+            gOutPutTangent = false;
+        }
     }
 }
 
@@ -1291,7 +1995,7 @@ void ParseFBXW(const wchar_t* fbxpath, const wchar_t* outdir, const wchar_t* par
     gFBXFileName = ImgName.substr(0, ImgName.rfind("."));
     
     SplitParameterW(parameter);
-    
+
     if (!lFilePath.IsEmpty())
     {
         bool lResult = LoadScene(lSdkManager, lScene, lFilePath.Buffer());

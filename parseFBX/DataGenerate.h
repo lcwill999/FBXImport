@@ -22,6 +22,7 @@ extern std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
 extern std::map<std::string, std::string> gBlendShapeMesh2Bone;
 extern std::string gOutPutDir;
 extern std::string gOutPutDirSantinized;
+extern bool gOutPutTangent;
 
 // 字符串转换函数声明
 std::string CodeTUTF8(const char* str, int t);
@@ -84,6 +85,9 @@ struct MeshBody
 	int NormalPos;
 	int NormalHeadLength;//8
 	uint64_t NormalLength;
+	int TangentPos;
+	int TangentHeadLength;//8
+	uint64_t TangentLength;
 	int UV1Pos;
 	int UV1HeadLength;//8
 	uint64_t UV1Length;
@@ -106,11 +110,17 @@ struct MeshBody
 	int BoneWeightHeadLength;//8
 	uint64_t BoneWeightLength;
 
-	MeshBody() : NamePos(0), NameHeadLength(0), NameLength(0), VerticesPos(0), VerticesHeadLength(0), VerticesLength(0),
-		ColorPos(0), ColorHeadLength(0), ColorLength(0), NormalPos(0), NormalHeadLength(0), NormalLength(0),
-		UV1Pos(0), UV1HeadLength(0), UV1Length(0), UV2Pos(0), UV2HeadLength(0), UV2Length(0),
-		IndexSizePos(0), IndexSizeHeadLength(0), IndexSizeLength(0), IndexPos(0), IndexHeadLength(0), IndexLength(0),
-		MatPos(0), MatHeadLength(0), MatLength(0), BindPosesPos(0), BindPosesHeadLength(0), BindPosesLength(0),
+	MeshBody() : NamePos(0), NameHeadLength(0), NameLength(0),
+		VerticesPos(0), VerticesHeadLength(0), VerticesLength(0),
+		ColorPos(0), ColorHeadLength(0), ColorLength(0), 
+		NormalPos(0), NormalHeadLength(0), NormalLength(0),
+		TangentPos(0),TangentHeadLength(0),TangentLength(0),
+		UV1Pos(0), UV1HeadLength(0), UV1Length(0), 
+		UV2Pos(0), UV2HeadLength(0), UV2Length(0),
+		IndexSizePos(0), IndexSizeHeadLength(0), IndexSizeLength(0), 
+		IndexPos(0), IndexHeadLength(0), IndexLength(0),
+		MatPos(0), MatHeadLength(0), MatLength(0), 
+		BindPosesPos(0), BindPosesHeadLength(0), BindPosesLength(0),
 		BoneWeightPos(0), BoneWeightHeadLength(0), BoneWeightLength(0)
 	{}
 };

@@ -1,4 +1,6 @@
 #pragma once
+#define NOMINMAX  // 避免 Windows 头文件中的 min/max 宏定义
+#include <windows.h>
 #include <fbxsdk.h>
 #include "Utility.h"
 #include "FBXImporterDef.h"
@@ -294,12 +296,12 @@ bool findNodeByName(const FBXImportNode& node, const std::string& targetName) {
 }
 
 const FBXImportNode* findMeshNodeRecursive(const FBXImportNode& currentNode, const std::string& name) {
-	if (findNodeByName(currentNode, name)) {
+	if (findNodeByName(currentNode, name) && currentNode.meshIndex != -1) {
 		return &currentNode;
 	}
 	for (const auto& child : currentNode.children) {
 		const FBXImportNode* result = findMeshNodeRecursive(child, name);
-		if (result != nullptr) {
+		if (result != nullptr && result->meshIndex != -1) {
 			return result;
 		}
 	}
@@ -309,7 +311,7 @@ const FBXImportNode* findMeshNodeRecursive(const FBXImportNode& currentNode, con
 const FBXImportNode* findFirstMatchingMeshNode(const std::vector<FBXImportNode>& rootNodes, const std::string& name) {
 	for (const auto& rootNode : rootNodes) {
 		const FBXImportNode* result = findMeshNodeRecursive(rootNode, name);
-		if (result != nullptr) {
+		if (result != nullptr && result->meshIndex != -1) {
 			return result;
 		}
 	}
@@ -322,8 +324,7 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 	EnsureDirectoryExists(outdir);
 
 	std::string directory(outdir);
-	
-	// 使用系统临时目录创建临时文件，避免中文路径问题
+
 	char tempPath[MAX_PATH];
 	GetTempPathA(MAX_PATH, tempPath);
 	
@@ -423,8 +424,7 @@ void WriteManifestErrorInput(const char* outdir, std::string filename,std::vecto
 	EnsureDirectoryExists(outdir);
 
 	std::string directory(outdir);
-	
-	// 使用系统临时目录创建临时文件，避免中文路径问题
+
 	char tempPath[MAX_PATH];
 	GetTempPathA(MAX_PATH, tempPath);
 	
@@ -533,7 +533,6 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 
 	std::string directory(outdir);
 
-	// 使用系统临时目录创建临时文件，避免中文路径问题
 	char tempPath[MAX_PATH];
 	GetTempPathA(MAX_PATH, tempPath);
 	
