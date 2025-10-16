@@ -1131,7 +1131,7 @@ inline Vector3f RobustNormalFromFace(const Vector3f* vertices, const UInt32* fac
             Vector3f nextYZX(nextVert.y, nextVert.z, nextVert.x);
             Vector3f curZXY(curVert.z, curVert.x, curVert.y);
             Vector3f nextZXY(nextVert.z, nextVert.x, nextVert.y);
-            normal += Cross(curYZX - nextYZX, curZXY + nextZXY);
+            normal += (curYZX - nextYZX) * (curZXY + nextZXY);
         }
     }
     else
@@ -1559,8 +1559,9 @@ void GenerateMeshData(const FBXImportMesh& constantMesh, const Matrix4x4f& trans
 
     FBXImportMeshSetting importmeshsetting2;
     importmeshsetting2.importNormal = true;
+    importmeshsetting2.normalImportMode = kNormalOptionsImport;
     importmeshsetting2.importTangent = true;
-
+    importmeshsetting2.tangentImportMode = kTangentSpaceOptionsImport;
     Triangulate(tmpMesh, originalMesh, importmeshsetting2, false);
 
     CleanUpMesh(originalMesh);
