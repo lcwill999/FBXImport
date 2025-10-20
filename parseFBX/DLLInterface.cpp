@@ -472,20 +472,6 @@ void ConvertFBXMesh(FbxMesh& fbx, FbxManager* sdkManager, FbxScene& fbxScene, Fb
 
 void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* node, FBXImportNode& outNode, FBXImportScene& scene, const FBXImportSettings& settings, const FBXImportMeshSetting& meshSettings, FBXMeshToInfoMap& fbxMeshToInfoMap, FBXMaterialLookup& fbxMaterialLookup)
 {
-    if (node->GetSkeleton())
-    {
-        auto ptr = node->GetSkeleton();
-        if (ptr)
-        {
-            auto skeletonType = ptr->GetSkeletonType();
-            std::cout << "SkeletonType: " << skeletonType << std::endl;
-            //if (skeletonType == FbxSkeleton::eLimbNode)
-            {
-                std::cout << "SkeltonNode: " << ptr->GetName() << std::endl;
-            }
-        }
-    }
-    std::cout << "Node: " << node->GetNameWithoutNameSpacePrefix() << std::endl;
     FbxVector4 translation, eulerRotation, scale;
     outNode.eulerRotation = ExtractFBXEulerOld(node->LclRotation.EvaluateValue(0));
     outNode.rotation = ExtractQuaternionFromFBXEulerOld(node->LclRotation.EvaluateValue(0));
