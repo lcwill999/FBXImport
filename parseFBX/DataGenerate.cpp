@@ -35,25 +35,10 @@ void BuildAllBoneNameMap(FBXImportScene& scene)
 {
 	gNodePath2Name.clear();
 	auto allnodes = scene.nodes;
-	if (allnodes.size() > 1)
-	{
-		for (auto i = 0; i < allnodes.size(); i++)
-		{
-			BuildBoneNameMap(allnodes[i], gNodePath2Name);
-		}
-	}
-	else if (allnodes.size() == 1)
-	{
-		std::vector<FBXImportNode> root = allnodes[0].children;
-		if (allnodes[0].name == UNITY_BONE_ROOT)
-		{
-			root = allnodes;
-		}
 
-		for (auto i = 0; i < root.size(); i++)
-		{
-			BuildBoneNameMap(root[i], gNodePath2Name);
-		}
+	for (auto i = 0; i < allnodes.size(); i++)
+	{
+		BuildBoneNameMap(allnodes[i], gNodePath2Name);
 	}
 }
 

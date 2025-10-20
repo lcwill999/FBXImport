@@ -839,6 +839,9 @@ struct SplitMeshImplementation
     void AddVertexByIndex(const FBXImportMesh& srcMesh, FBXImportMesh& dstMesh, int srcVertexIndex)
     {
         dstMesh.vertices.push_back(srcMesh.vertices[srcVertexIndex]);
+        for (int i = 0; i < srcMesh.shapes.size(); ++i)
+            dstMesh.shapes[i].vertices.push_back(srcMesh.shapes[i].vertices[srcVertexIndex]);
+
         if (!srcMesh.skin.empty())
             dstMesh.skin.push_back(srcMesh.skin[srcVertexIndex]);
     }
@@ -853,7 +856,17 @@ struct SplitMeshImplementation
                 dstMesh.uvs[uvIndex].push_back(srcMesh.uvs[uvIndex][srcAttributeIndex]);
         if (!srcMesh.tangents.empty())
             dstMesh.tangents.push_back(srcMesh.tangents[srcAttributeIndex]);
+        
+        for (size_t i = 0; i < srcMesh.shapes.size(); ++i)
+        {
+            const FBXImportBlendShape& srcShape = srcMesh.shapes[i];
+            FBXImportBlendShape& dstShape = dstMesh.shapes[i];
 
+            if (!srcShape.normals.empty())
+                dstShape.normals.push_back(srcShape.normals[srcAttributeIndex]);
+            if (!srcShape.tangents.empty())
+                dstShape.tangents.push_back(srcShape.tangents[srcAttributeIndex]);
+        }
     }
 
 
@@ -925,6 +938,21 @@ struct SplitMeshImplementation
         }
         if (!srcMesh.tangents.empty())
             dstMesh.tangents.resize(srcMesh.vertices.size(), Vector4f(1.0f, 0.0f, 0.0f, 0.0F));
+
+
+        dstMesh.shapes.resize(srcMesh.shapes.size());
+        for (size_t i = 0; i < srcMesh.shapes.size(); ++i)
+        {
+            const FBXImportBlendShape& srcShape = srcMesh.shapes[i];
+            FBXImportBlendShape& dstShape = dstMesh.shapes[i];
+
+            dstShape.targetWeight = srcShape.targetWeight;
+            dstShape.vertices = srcShape.vertices;
+            if (!srcShape.normals.empty())
+                dstShape.normals.resize(srcShape.vertices.size(), Vector3f::zAxis);
+            if (!srcShape.tangents.empty())
+                dstShape.tangents.resize(srcShape.vertices.size(), Vector3f::xAxis);
+        }
 
 
         typedef std::list<int> AlreadySplitVertices;
