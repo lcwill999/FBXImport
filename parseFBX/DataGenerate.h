@@ -22,8 +22,9 @@ extern std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
 extern std::map<std::string, std::string> gBlendShapeMesh2Bone;
 extern std::string gOutPutDir;
 extern std::string gOutPutDirSantinized;
+extern std::string gFBXFileName;
 extern bool gOutPutTangent;
-
+extern bool gAnimUseFBXName;
 // 字符串转换函数声明
 std::string CodeTUTF8(const char* str, int t);
 std::wstring ConvertUTF8ToWide(const std::string& utf8Str);
@@ -139,7 +140,7 @@ void BuildSingleAnimBinaryFile(FBXImportScene& scene, FBXImportAnimationClip& cl
 void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& clip, const char* outdir);
 
 // 骨骼数据处理函数声明
-void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent);
+void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent, std::string parentpath = "");
 
 // 调试和解析函数声明
 void ParseSingleMesh(std::string meshfile);

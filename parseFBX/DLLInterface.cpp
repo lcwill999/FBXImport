@@ -18,7 +18,6 @@
 
 static bool gIsBrokenLightwaveFile = false;
 static std::map<FbxNode*, FBXImportNode*> gFBXNodeMap;
-static std::string gFBXFileName = "";
 static float gGlobalScale = 1.0f;
 
 
@@ -1843,11 +1842,12 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
 
         //WriteMeshFileNew(&gameObject, outputScene, outdir);
         WriteMeshAllFile(&gameObject, outputScene, outdir, gFBXFileName);
-        WriteAnimClipProtoBuf(outputScene, outdir);
+
         if (outputScene.sceneInfo.hasSkeleton || (gNodeName2BoneBindePose.size()!=0 && gNodeName2BoneName.size()!=0))
         {
             WriteSkeletonProtoBuf(outputScene, outdir, gFBXFileName.c_str());
         }
+        WriteAnimClipProtoBuf(outputScene, outdir);
     }
     //Clear Path
     std::string outputPath(outdir);
@@ -1896,6 +1896,10 @@ void SplitParameter(char* parameter)
         if (pResult[0] == "disabletangent")
         {
             gOutPutTangent = false;
+        }
+        if (pResult[0] == "usefbxname")
+        {
+            gAnimUseFBXName = true;
         }
     }
 }
@@ -1992,6 +1996,10 @@ void SplitParameterW(const wchar_t* parameter)
         if (pResult[0] == "disabletangent")
         {
             gOutPutTangent = false;
+        }
+        if (pResult[0] == "usefbxname")
+        {
+            gAnimUseFBXName = true;
         }
     }
 }

@@ -14,9 +14,11 @@ std::map<std::string, std::string> gNodePath2Name;
 std::map<std::string, std::vector<std::string>> gNodeName2BoneName;
 std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
 std::map<std::string, std::string> gBlendShapeMesh2Bone;
+std::string gFBXFileName = "";
 std::string gOutPutDir;
 std::string gOutPutDirSantinized;
 bool gOutPutTangent = true;
+bool gAnimUseFBXName = false;
 
 void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& path2name, std::string parentpath)
 {
@@ -1090,7 +1092,7 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 	RenameFileToWide(tempAnimFilename, AnimfilenameW);
 }
 
-void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent)
+void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent, std::string parentpath)
 {
 	message::UGCResBoneNodeData* msg_node = parent->add_childbones();
 	message::UGCResBoneNodeCapsuleData root_capsule;
@@ -1107,10 +1109,18 @@ void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCR
 	msg_node->set_allocated_localposition(msg_pos);
 	msg_node->set_allocated_localrotation(msg_quat);
 	msg_node->set_allocated_localscale(msg_scale);
+	std::string nodeName = node.name;
+	std::string nodePath = nodeName;
+	if (parentpath != "")
+		nodePath = parentpath + "/" + nodeName;
+	gNodePath2Name.insert(std::pair<std::string, std::string>(nodePath, nodeName));
+	
+	std::string childParentPath = nodePath;
+	
 	for (auto i = 0; i < node.children.size(); i++)
 	{
 		auto nextNode = node.children[i];
-		BuildBoneNodeData(scene, nextNode, msg_node);
+		BuildBoneNodeData(scene, nextNode, msg_node, childParentPath);
 	}
 }
 

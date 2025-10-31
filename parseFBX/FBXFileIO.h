@@ -477,6 +477,7 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 {
 	EnsureDirectoryExists(outdir);
 
+	gNodePath2Name.clear();
 	message::UGCResSkeletonData* sk = new message::UGCResSkeletonData();
 
 	message::UGCResBoneNodeData* root = new message::UGCResBoneNodeData();
@@ -501,18 +502,18 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 		// multi root - add an "root" node to ensure a single root tree
 		for (auto i = 0; i < allnodes.size(); i++)
 		{
-			BuildBoneNodeData(scene, allnodes[i], root);
+			BuildBoneNodeData(scene, allnodes[i], root, "");
 		}
 	}
 	else if (allnodes.size() == 1 )
 	{
 		// single root- rename the single name as root
 		auto rootnode = allnodes[0];
-		//if (rootnode.name == UNITY_BONE_ROOT)
-		//{
-		//	BuildBoneNodeData(scene, rootnode, root);
-		//}
-		//else
+		if (scene.meshes.size()==0)
+		{
+			BuildBoneNodeData(scene, rootnode, root);
+		}
+		else
 		{
 			pos->set_x(rootnode.position.x * scaleFactor); pos->set_y(rootnode.position.y * scaleFactor); pos->set_z(rootnode.position.z * scaleFactor);
 			scale->set_x(rootnode.scale.x); scale->set_y(rootnode.scale.y); scale->set_z(rootnode.scale.z);
@@ -521,7 +522,7 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 			auto childnodes = rootnode.children;
 			for (auto i = 0; i < childnodes.size(); i++)
 			{
-				BuildBoneNodeData(scene, childnodes[i], root);
+				BuildBoneNodeData(scene, childnodes[i], root, "");
 			}
 		}
 	}
@@ -573,7 +574,8 @@ void WriteAnimClipProtoBuf(FBXImportScene& scene, const char* outdir)
 	EnsureDirectoryExists(outdir);
 
 	auto& anim = scene.animationClips;
-
+	if (gAnimUseFBXName && anim.size() == 1 )
+		anim[0].name = gFBXFileName.c_str();
 	for (auto i = 0; i < anim.size(); i++)
 	{
 		if (anim[i].HasAnimations())
