@@ -19,6 +19,7 @@
 static bool gIsBrokenLightwaveFile = false;
 static std::map<FbxNode*, FBXImportNode*> gFBXNodeMap;
 static float gGlobalScale = 1.0f;
+static int gMeshLimitation = 30000;  // 默认值：90000/3 = 30000
 
 
 class ConnectedMesh
@@ -1825,7 +1826,7 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
     {
         InstantiateImportMesh(i, gameObject, outputScene, outdir);
 
-        if (outputScene.meshes[i].polygons.size() > 90000)
+        if (outputScene.meshes[i].polygons.size() > gMeshLimitation * 3)
         {
             outIndexMesh.push_back(outputScene.meshes[i].name);
         }
@@ -1834,7 +1835,7 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
     if (outIndexMesh.size() > 0)
     {
         WriteManifestErrorInput(outdir, gFBXFileName,outIndexMesh);
-        std::cout << "Error : Triangles Out of Limitation!" << std::endl;
+        std::cout << "Error : Triangles Out of Limitation! " << outIndexMesh.size() << " mesh(es) exceeded the limit." << std::endl;
     }
     else
     {
@@ -1846,6 +1847,13 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
         if (outputScene.sceneInfo.hasSkeleton || (gNodeName2BoneBindePose.size()!=0 && gNodeName2BoneName.size()!=0))
         {
             WriteSkeletonProtoBuf(outputScene, outdir, gFBXFileName.c_str());
+        }
+        else
+        {
+            if (outputScene.animationClips.size()>0)
+            {
+                BuildNodePath2NameForAnim(outputScene);
+            }
         }
         WriteAnimClipProtoBuf(outputScene, outdir);
     }
@@ -1893,13 +1901,17 @@ void SplitParameter(char* parameter)
         {
             gGlobalScale = atof(pResult[1].c_str());
         }
-        if (pResult[0] == "disabletangent")
+        if (pResult[0] == "enabletangent")
         {
-            gOutPutTangent = false;
+            gOutPutTangent = true;
         }
         if (pResult[0] == "usefbxname")
         {
             gAnimUseFBXName = true;
+        }
+        if (pResult[0] == "meshlimitation")
+        {
+            gMeshLimitation = atoi(pResult[1].c_str());
         }
     }
 }
@@ -1993,13 +2005,17 @@ void SplitParameterW(const wchar_t* parameter)
         {
             gGlobalScale = atof(pResult[1].c_str());
         }
-        if (pResult[0] == "disabletangent")
+        if (pResult[0] == "enabletangent")
         {
-            gOutPutTangent = false;
+            gOutPutTangent = true;
         }
         if (pResult[0] == "usefbxname")
         {
             gAnimUseFBXName = true;
+        }
+        if (pResult[0] == "meshlimitation")
+        {
+            gMeshLimitation = atoi(pResult[1].c_str());
         }
     }
 }

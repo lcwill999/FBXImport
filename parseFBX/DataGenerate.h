@@ -49,6 +49,7 @@ std::string SanitizeName(const char* name);
 // 骨骼名称映射函数声明
 void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& path2name, std::string parentpath = "");
 void BuildAllBoneNameMap(FBXImportScene& scene);
+void BuildNodePath2NameForAnim(FBXImportScene& scene);
 void BuildMeshBoneRefMap(FBXImportScene& scene);
 void BuildBlendShapeBoneMap(FBXImportScene& scene);
 

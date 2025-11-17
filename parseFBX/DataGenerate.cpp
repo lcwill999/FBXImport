@@ -17,7 +17,7 @@ std::map<std::string, std::string> gBlendShapeMesh2Bone;
 std::string gFBXFileName = "";
 std::string gOutPutDir;
 std::string gOutPutDirSantinized;
-bool gOutPutTangent = true;
+bool gOutPutTangent = false;
 bool gAnimUseFBXName = false;
 
 void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& path2name, std::string parentpath)
@@ -41,6 +41,32 @@ void BuildAllBoneNameMap(FBXImportScene& scene)
 	for (auto i = 0; i < allnodes.size(); i++)
 	{
 		BuildBoneNameMap(allnodes[i], gNodePath2Name);
+	}
+}
+
+void BuildNodePath2NameForAnim(FBXImportScene& scene)
+{
+	gNodePath2Name.clear();
+	auto allnodes = scene.nodes;
+	
+	// 参考 WriteSkeletonProtoBuf 的逻辑
+	if (allnodes.size() > 1)
+	{
+		// 多个根节点：从第一级开始（scene.nodes）
+		for (auto i = 0; i < allnodes.size(); i++)
+		{
+			BuildBoneNameMap(allnodes[i], gNodePath2Name, "");
+		}
+	}
+	else if (allnodes.size() == 1)
+	{
+		// 单个根节点：跳过第一级，从其下一级（子节点）开始
+		auto rootnode = allnodes[0];
+		auto childnodes = rootnode.children;
+		for (auto i = 0; i < childnodes.size(); i++)
+		{
+			BuildBoneNameMap(childnodes[i], gNodePath2Name, "");
+		}
 	}
 }
 
