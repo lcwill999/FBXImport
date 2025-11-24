@@ -1822,6 +1822,7 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
     FBXGameObject gameObject;
     std::vector<std::string> outIndexMesh;
     outIndexMesh.clear();
+    int maxTriangles = -1;
     for (int i = 0; i < outputScene.meshes.size(); i++)
     {
         InstantiateImportMesh(i, gameObject, outputScene, outdir);
@@ -1829,6 +1830,11 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
         if (outputScene.meshes[i].polygons.size() > gMeshLimitation * 3)
         {
             outIndexMesh.push_back(outputScene.meshes[i].name);
+            int curTriangles = outputScene.meshes[i].polygons.size() / 3;
+            if (curTriangles > maxTriangles)
+            {
+                maxTriangles = curTriangles;
+            }
         }
     }
 
@@ -1836,6 +1842,7 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
     {
         WriteManifestErrorInput(outdir, gFBXFileName,outIndexMesh);
         std::cout << "Error : Triangles Out of Limitation! " << outIndexMesh.size() << " mesh(es) exceeded the limit." << std::endl;
+        std::cout << "The Max Triangle Count is " << maxTriangles << " ." << std::endl;
     }
     else
     {
