@@ -4,6 +4,7 @@
 #include "AnimationKeyFrameReducer.h"
 #include <iostream>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 #include <map>
@@ -749,6 +750,40 @@ std::string CodeTUTF8(const char* str, int t)
 	return result;
 }
 
+// Unity 的 AnimationClip.length 取曲线最后一帧，不用 AnimStack 时间轴。
+// 关键帧压缩会保留首尾键，最后一帧时间不变。
+static void AccumulateCurveStop(const FBXAnimationCurve& curve, float& stopTime, bool& hasKey)
+{
+	if (curve.GetKeyCount() <= 0)
+		return;
+	hasKey = true;
+	const float curveStop = curve.GetRange().second;
+	if (curveStop > stopTime)
+		stopTime = curveStop;
+}
+
+static void ApplyClipLengthFromKeys(FBXImportAnimationClip& clip)
+{
+	float stopTime = -std::numeric_limits<float>::infinity();
+	bool hasKey = false;
+
+	for (auto it = clip.nodeAnimations.begin(); it != clip.nodeAnimations.end(); ++it)
+	{
+		for (int i = 0; i < 4; ++i)
+			AccumulateCurveStop(it->rotation[i], stopTime, hasKey);
+		for (int i = 0; i < 3; ++i)
+		{
+			AccumulateCurveStop(it->translation[i], stopTime, hasKey);
+			AccumulateCurveStop(it->scale[i], stopTime, hasKey);
+		}
+	}
+	for (auto it = clip.floatAnimations.begin(); it != clip.floatAnimations.end(); ++it)
+		AccumulateCurveStop(it->curve, stopTime, hasKey);
+
+	if (hasKey)
+		clip.bakeStop = stopTime;
+}
+
 // 动画相关函数
 void BuildSingleAnimProtoFile(FBXImportScene& scene, FBXImportAnimationClip& clip, const char* outdir)
 {
@@ -759,6 +794,7 @@ void BuildSingleAnimProtoFile(FBXImportScene& scene, FBXImportAnimationClip& cli
 	auto sampleRate = scene.sceneInfo.sampleRate;
 	auto fileScale = scene.fileScaleFactor;
 	ReduceKeyframes(clip, sampleRate, 0.5f, 0.5f, 0.5f, 0.5f);
+	ApplyClipLengthFromKeys(clip);
 	AnimClipProto.set_name(clip.name);
 	AnimClipProto.set_bakestart(clip.bakeStart);
 	AnimClipProto.set_bakestop(clip.bakeStop);
@@ -891,6 +927,7 @@ void BuildSingleAnimBinaryFile(FBXImportScene& scene, FBXImportAnimationClip& cl
 	byte MagicNumber4 = 134;
 	int Version = 1009715;
 
+	ApplyClipLengthFromKeys(clip);
 	float BakeStart = clip.bakeStart;
 	float BakeStop = clip.bakeStop;
 	float SampleRate = scene.sceneInfo.sampleRate;
@@ -1028,6 +1065,7 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 	byte MagicNumber4 = 134;
 	int Version = 1009715;
 
+	ApplyClipLengthFromKeys(clip);
 	float BakeStart = clip.bakeStart;
 	float BakeStop = clip.bakeStop;
 	float SampleRate = scene.sceneInfo.sampleRate;
