@@ -257,6 +257,9 @@ void WriteMeshAllFile(FBXGameObject* gameObj, FBXImportScene& importScene, const
 		std::string realFileName;
 		BuildSingleMesh(gameObj->meshList[i], importScene,meshfilename, outdir, realFileName);
 		
+		if (realFileName.empty())
+			continue;
+
 		meshnamelist.push_back(realFileName);
 		meshtomatindex.insert(meshtomatindex.end(), gameObj->meshList[i].materialindex.begin(), gameObj->meshList[i].materialindex.end());
 		meshtomatindex.push_back(-1);
@@ -353,11 +356,21 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 	}
 	osData <<"    ]," << std::endl;
 	//Mesh Details
-	osData << "    \"MeshCount\" : " << gameObj->meshCount << "," << std::endl;
-	osData << "    \"MeshDetail\" : [" << std::endl;
-	auto nodes = importScene.nodes;
+	int validMeshCount = 0;
 	for (int i = 0; i < gameObj->meshCount; i++)
 	{
+		if (!gameObj->meshList[i].vertices.empty() && !gameObj->meshList[i].indices.empty())
+			validMeshCount++;
+	}
+	osData << "    \"MeshCount\" : " << validMeshCount << "," << std::endl;
+	osData << "    \"MeshDetail\" : [" << std::endl;
+	auto nodes = importScene.nodes;
+	int writtenMeshCount = 0;
+	for (int i = 0; i < gameObj->meshCount; i++)
+	{
+		if (gameObj->meshList[i].vertices.empty() || gameObj->meshList[i].indices.empty())
+			continue;
+
 		auto name = gameObj->meshList[i].name;
 		osData << "    {" << std::endl;
 		osData << "        \"MeshName\" : \"" << name << "\"," << std::endl;
@@ -403,8 +416,8 @@ void WriteManifest(FBXGameObject* gameObj, std::vector<std::string>& materials, 
 			osData << std::endl;
 		osData << "    }";
 
-
-		if (i != (gameObj->meshCount - 1))
+		writtenMeshCount++;
+		if (writtenMeshCount != validMeshCount)
 			osData << ",";
 		osData << std::endl;
 	}

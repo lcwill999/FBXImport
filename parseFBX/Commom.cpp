@@ -191,6 +191,9 @@ bool LoadScene(FbxManager* pManager, FbxDocument* pScene, const char* pFilename)
         IOS_REF.SetBoolProp(IMP_FBX_GLOBAL_SETTINGS, true);
     }
 
+    // Disable extraction of embedded media to avoid generating the <filename>.fbm folder.
+    IOS_REF.SetBoolProp(IMP_FBX_EXTRACT_EMBEDDED_DATA, false);
+
     // Import the scene.
     lStatus = lImporter->Import(pScene);
     if (lStatus == false && lImporter->GetStatus() == FbxStatus::ePasswordError)

@@ -131,9 +131,8 @@ void PrebuildFBXMeshForBlendShape(FBXMesh& meshData)
 {
 	if (meshData.vertices.size() > 0)
 	{
-		auto allBoneWeights = meshData.boneWeights;
 		BoneWeights4 boneWeights = { {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0} };
-		allBoneWeights.resize(meshData.vertices.size(), boneWeights);
+		meshData.boneWeights.resize(meshData.vertices.size(), boneWeights);
 		Matrix4x4f ident;
 		ident.SetIdentity();
 		meshData.bindPoses.push_back(ident);
@@ -232,6 +231,13 @@ void BuildMeshTxt(FBXMesh& meshData, FBXImportScene& importScene, const char* ou
 
 void BuildSingleMesh(FBXMesh& meshData, FBXImportScene& importScene, std::string& filename, const char* outdir, std::string& realPath)
 {
+	if (meshData.vertices.empty() || meshData.indices.empty())
+	{
+		std::cerr << "Error : Vertices or Indexes may be missing, skip mesh: " << (meshData.name ? meshData.name : "unknown") << std::endl;
+		realPath.clear();
+		return;
+	}
+
 	EnsureDirectoryExists(outdir);
 	bool isSkinnedMesh = false;
 	message::UGCResSkinnedMeshExtData extData = BuildMeshExtData(meshData);
@@ -276,7 +282,7 @@ void BuildSingleMesh(FBXMesh& meshData, FBXImportScene& importScene, std::string
 	osData.close();
 	
 	std::string dstDirectory(gOutPutDir);
-	realPath = std::string(meshData.name);
+	realPath = SanitizeName(meshData.name);
 	if (isSkinnedMesh)
 		realPath = dstDirectory + "\\" + realPath + ".~@FFSKIN";
 	else
@@ -511,7 +517,6 @@ void RenameFileToWide(const std::string& originalName, const std::wstring& newNa
 			EnsureDirectoryExists(targetDirectory);
 		}
 
-		// 首先尝试直接移动文件
 		if (MoveFileExW(wideOriginalName.c_str(), newName.c_str(), MOVEFILE_REPLACE_EXISTING)) {
 			wprintf(L"File renamed successfully to: %ls\n", newName.c_str());
 		}
@@ -527,11 +532,16 @@ void RenameFileToWide(const std::string& originalName, const std::wstring& newNa
 					}
 				}
 				else {
-					wprintf(L"File copy failed, error code: %d\n", GetLastError());
+					DWORD copyError = GetLastError();
+					wprintf(L"File copy failed, error code: %d\n", copyError);
+					wprintf(L"  Source: %ls\n", wideOriginalName.c_str());
+					wprintf(L"  Destination: %ls\n", newName.c_str());
 				}
 			}
 			else {
 				wprintf(L"File rename failed, error code: %d\n", error);
+				wprintf(L"  Source: %ls\n", wideOriginalName.c_str());
+				wprintf(L"  Destination: %ls\n", newName.c_str());
 			}
 		}
 	}
@@ -849,7 +859,7 @@ void BuildSingleAnimProtoFile(FBXImportScene& scene, FBXImportAnimationClip& cli
 
 	//Rename To Support Chinese		
 	std::string dstDirectory(gOutPutDir);
-	std::string dstAnimfilename(clip.name);
+	std::string dstAnimfilename = SanitizeName(clip.name.c_str());
 	dstAnimfilename = dstDirectory + "\\" + dstAnimfilename + ".Anim";
 	std::wstring dstMeshfilenameW = ConvertUTF8ToWide(dstAnimfilename);
 	RenameFileToWide(tempAnimFilename, dstMeshfilenameW);
@@ -987,7 +997,7 @@ void BuildSingleAnimBinaryFile(FBXImportScene& scene, FBXImportAnimationClip& cl
 	osData.close();
 	//Rename To Support Chinese	
 	std::string dstDirectory(gOutPutDir);
-	std::string dstAnimfilename(clip.name);
+	std::string dstAnimfilename = SanitizeName(clip.name.c_str());
 	dstAnimfilename = dstDirectory + "\\" + dstAnimfilename + ".Anim";
 	std::wstring AnimfilenameW = ConvertUTF8ToWide(dstAnimfilename);
 	RenameFileToWide(tempAnimFilename, AnimfilenameW);
@@ -1112,7 +1122,7 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 	osData.close();
 	//Rename To Support Chinese		
 	std::string dstDirectory(gOutPutDir);
-	std::string dstAnimfilename(clip.name);
+	std::string dstAnimfilename = SanitizeName(clip.name.c_str());
 	dstAnimfilename = dstDirectory + "\\" + dstAnimfilename + "_anim.txt";
 	std::wstring AnimfilenameW = ConvertUTF8ToWide(dstAnimfilename);
 	RenameFileToWide(tempAnimFilename, AnimfilenameW);

@@ -493,7 +493,14 @@ void RecursiveImportNodes(FbxManager* fbxManager, FbxScene& fbxScene, FbxNode* n
     outNode.name = node->GetNameWithoutNameSpacePrefix();   
     gFBXNodeMap[node] = &outNode;
 
-    if (node->GetMesh())
+    if (node->GetMesh() && node->GetMesh()->GetControlPointsCount() <= 0)
+    {
+        std::cout << "Skip empty mesh (no vertices) on node: "
+                  << static_cast<const char*>(node->GetNameWithoutNameSpacePrefix())
+                  << std::endl;
+    }
+
+    if (node->GetMesh() && node->GetMesh()->GetControlPointsCount() > 0)
     {
         FbxMesh* mesh = node->GetMesh();
 
