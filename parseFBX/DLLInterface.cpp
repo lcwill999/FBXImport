@@ -1085,8 +1085,9 @@ static void FillLodMeshData(const FBXImportMesh& splitMesh, FBXMesh& lodMesh, st
         }
         //Add bone weights & bindpose
         lodMesh.boneWeights = splitMesh.skin;
-        if (gNodeName2BoneBindePose.find(splitMesh.name) != gNodeName2BoneBindePose.end())
-            lodMesh.bindPoses = gNodeName2BoneBindePose[splitMesh.name];
+        auto foundSkin = gMeshBoneRefs.find(splitMesh.name);
+        if (foundSkin != gMeshBoneRefs.end())
+            lodMesh.bindPoses = foundSkin->second.bindPoses;
     }
 }
 
@@ -1858,7 +1859,7 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
         //WriteMeshFileNew(&gameObject, outputScene, outdir);
         WriteMeshAllFile(&gameObject, outputScene, outdir, gFBXFileName);
 
-        if (outputScene.sceneInfo.hasSkeleton || (gNodeName2BoneBindePose.size()!=0 && gNodeName2BoneName.size()!=0))
+        if (outputScene.sceneInfo.hasSkeleton || !gMeshBoneRefs.empty())
         {
             WriteSkeletonProtoBuf(outputScene, outdir, gFBXFileName.c_str());
         }
@@ -1866,7 +1867,7 @@ void ParseFBXScene(FbxManager* fbxManager, FbxScene& fbxScene, char* outdir)
         {
             if (outputScene.animationClips.size()>0)
             {
-                BuildNodePath2NameForAnim(outputScene);
+                BuildAllBoneNameMap(outputScene);
             }
         }
         WriteAnimClipProtoBuf(outputScene, outdir);

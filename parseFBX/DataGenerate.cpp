@@ -8,12 +8,12 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <Windows.h>
 
 // 全局变量定义
-std::map<std::string, std::string> gNodePath2Name;
-std::map<std::string, std::vector<std::string>> gNodeName2BoneName;
-std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
+std::map<const FBXImportNode*, std::string> gNodePtr2Path;
+std::map<std::string, MeshBoneRef> gMeshBoneRefs;
 std::map<std::string, std::string> gBlendShapeMesh2Bone;
 std::string gFBXFileName = "";
 std::string gOutPutDir;
@@ -21,108 +21,471 @@ std::string gOutPutDirSantinized;
 bool gOutPutTangent = false;
 bool gAnimUseFBXName = false;
 
-void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& path2name, std::string parentpath)
+bool ShouldAbsorbSceneWrapper(const FBXImportScene& scene)
 {
-	std::string NodeName = node.name;
-	std::string NodePath = NodeName;
-	if(parentpath != "")
-		NodePath = parentpath + "/" + NodeName;
-	path2name.insert(std::pair<std::string, std::string>(NodePath, NodeName));
+	return scene.nodes.size() == 1 && !scene.sceneInfo.hasSkeleton;
+}
+
+void RegisterNodePath(FBXImportNode& node, const std::string& nodePath)
+{
+	gNodePtr2Path[&node] = nodePath;
+}
+
+void BuildBoneNameMap(FBXImportNode& node, std::string parentpath)
+{
+	std::string NodePath = node.name;
+	if (parentpath != "")
+		NodePath = parentpath + "/" + node.name;
+	RegisterNodePath(node, NodePath);
 	for (auto i = 0; i < node.children.size(); i++)
 	{
-		BuildBoneNameMap(node.children[i], path2name, NodePath);
+		BuildBoneNameMap(node.children[i], NodePath);
 	}
 }
 
 void BuildAllBoneNameMap(FBXImportScene& scene)
 {
-	gNodePath2Name.clear();
-	auto allnodes = scene.nodes;
-
-	for (auto i = 0; i < allnodes.size(); i++)
+	gNodePtr2Path.clear();
+	if (!ShouldAbsorbSceneWrapper(scene) || scene.nodes.empty())
 	{
-		BuildBoneNameMap(allnodes[i], gNodePath2Name);
+		for (auto i = 0; i < scene.nodes.size(); i++)
+			BuildBoneNameMap(scene.nodes[i]);
+		return;
+	}
+
+	RegisterNodePath(scene.nodes[0], "");
+	for (auto i = 0; i < scene.nodes[0].children.size(); i++)
+		BuildBoneNameMap(scene.nodes[0].children[i], "");
+}
+
+std::string ResolveAnimNodePath(const FBXImportNode* node)
+{
+	if (node == nullptr)
+		return "";
+	auto found = gNodePtr2Path.find(node);
+	if (found != gNodePtr2Path.end())
+		return found->second;
+	return node->name;
+}
+
+bool ShouldWriteAnimNode(const FBXImportNode* node)
+{
+	return !ResolveAnimNodePath(node).empty();
+}
+
+static Vector3f RotateVectorByQuat(const Quaternionf& q, const Vector3f& v)
+{
+	Quaternionf p(v.x, v.y, v.z, 0.0f);
+	Quaternionf inv(-q.x, -q.y, -q.z, q.w);
+	Quaternionf r = q * p * inv;
+	return Vector3f(r.x, r.y, r.z);
+}
+
+static Quaternionf CanonicalQuat(const Quaternionf& q)
+{
+	return q.w < 0.0f ? -q : q;
+}
+
+static void ComposeWrapperRestIntoChild(const FBXImportNode& wrapper, const Vector3f& childPos, const Quaternionf& childRot, const Vector3f& childScale, Vector3f& outPos, Quaternionf& outRot, Vector3f& outScale)
+{
+	const Quaternionf wrapperRot = CanonicalQuat(wrapper.rotation);
+	Vector3f scaled(childPos.x * wrapper.scale.x, childPos.y * wrapper.scale.y, childPos.z * wrapper.scale.z);
+	Vector3f rotated = RotateVectorByQuat(wrapperRot, scaled);
+	outPos = Vector3f(rotated.x + wrapper.position.x, rotated.y + wrapper.position.y, rotated.z + wrapper.position.z);
+	outRot = wrapperRot * childRot;
+	outScale = Vector3f(wrapper.scale.x * childScale.x, wrapper.scale.y * childScale.y, wrapper.scale.z * childScale.z);
+}
+
+static void ComposeWrapperRestIntoChild(const FBXImportNode& wrapper, const FBXImportNode& child, Vector3f& outPos, Quaternionf& outRot, Vector3f& outScale)
+{
+	ComposeWrapperRestIntoChild(wrapper, child.position, child.rotation, child.scale, outPos, outRot, outScale);
+}
+
+void AttachSceneNodesToSkeleton(FBXImportScene& scene, message::UGCResBoneNodeData* root)
+{
+	if (ShouldAbsorbSceneWrapper(scene))
+	{
+		RegisterNodePath(scene.nodes[0], "");
+		for (auto i = 0; i < scene.nodes[0].children.size(); i++)
+		{
+			Vector3f pos;
+			Quaternionf rot;
+			Vector3f scl;
+			ComposeWrapperRestIntoChild(scene.nodes[0], scene.nodes[0].children[i], pos, rot, scl);
+			BuildBoneNodeData(scene, scene.nodes[0].children[i], root, "", pos, rot, scl);
+		}
+		return;
+	}
+
+	for (auto i = 0; i < scene.nodes.size(); i++)
+		BuildBoneNodeData(scene, scene.nodes[i], root, "");
+}
+
+static bool IsWrapperRestIdentity(const FBXImportNode& wrapper)
+{
+	const Quaternionf wrapperRot = CanonicalQuat(wrapper.rotation);
+	const bool posIdentity =
+		CompareApproximately(wrapper.position.x, 0.0f) &&
+		CompareApproximately(wrapper.position.y, 0.0f) &&
+		CompareApproximately(wrapper.position.z, 0.0f);
+	const bool scaleIdentity =
+		CompareApproximately(wrapper.scale.x, 1.0f) &&
+		CompareApproximately(wrapper.scale.y, 1.0f) &&
+		CompareApproximately(wrapper.scale.z, 1.0f);
+	const bool rotIdentity =
+		CompareApproximately(wrapperRot.x, 0.0f) &&
+		CompareApproximately(wrapperRot.y, 0.0f) &&
+		CompareApproximately(wrapperRot.z, 0.0f) &&
+		CompareApproximately(wrapperRot.w, 1.0f);
+	return posIdentity && scaleIdentity && rotIdentity;
+}
+
+static bool CurvesShareKeyTimes(const FBXAnimationCurve* curves, int count)
+{
+	if (count <= 0 || curves[0].GetKeyCount() <= 0)
+		return false;
+	const int n = curves[0].GetKeyCount();
+	for (int i = 1; i < count; ++i)
+	{
+		if (curves[i].GetKeyCount() != n)
+			return false;
+		for (int k = 0; k < n; ++k)
+		{
+			if (curves[i].GetKey(k).time != curves[0].GetKey(k).time)
+				return false;
+		}
+	}
+	return true;
+}
+
+static float EvalCurveOr(const FBXAnimationCurve& curve, float time, float fallback)
+{
+	if (curve.GetKeyCount() <= 0)
+		return fallback;
+	return curve.Evaluate(time);
+}
+
+static void CollectCurveTimes(const FBXAnimationCurve* curves, int count, std::set<float>& times)
+{
+	for (int i = 0; i < count; ++i)
+	{
+		for (int k = 0; k < curves[i].GetKeyCount(); ++k)
+			times.insert(curves[i].GetKey(k).time);
 	}
 }
 
-void BuildNodePath2NameForAnim(FBXImportScene& scene)
+static void RebuildCurveAtTimes(FBXAnimationCurve& curve, const std::vector<float>& times, const std::vector<float>& values)
 {
-	gNodePath2Name.clear();
-	auto allnodes = scene.nodes;
-	
-	// 参考 WriteSkeletonProtoBuf 的逻辑
-	if (allnodes.size() > 1)
+	InternalWrapMode pre = curve.preInfinity;
+	InternalWrapMode post = curve.postInfinity;
+	RotationOrder rotOrder = curve.GetRotationOrder();
+	curve.m_Curve.clear();
+	curve.InvalidateCache();
+	curve.preInfinity = pre;
+	curve.postInfinity = post;
+	curve.SetRotationOrder(rotOrder);
+
+	const int n = (int)times.size();
+	for (int i = 0; i < n; ++i)
 	{
-		// 多个根节点：从第一级开始（scene.nodes）
-		for (auto i = 0; i < allnodes.size(); i++)
+		FBXKeyFrameTpl<float> key;
+		key.time = times[i];
+		key.value = values[i];
+		key.weightedMode = kNotWeighted;
+		key.inWeight = 1.0f / 3.0f;
+		key.outWeight = 1.0f / 3.0f;
+		key.inSlope = 0.0f;
+		key.outSlope = 0.0f;
+		curve.AddKeyBackFast(key);
+	}
+
+	if (n < 2)
+		return;
+	for (int i = 0; i < n; ++i)
+	{
+		float m = 0.0f;
+		if (i == 0)
+			m = (values[1] - values[0]) / (times[1] - times[0]);
+		else if (i == n - 1)
+			m = (values[n - 1] - values[n - 2]) / (times[n - 1] - times[n - 2]);
+		else
 		{
-			BuildBoneNameMap(allnodes[i], gNodePath2Name, "");
+			const float dx1 = times[i] - times[i - 1];
+			const float dx2 = times[i + 1] - times[i];
+			const float m1 = Abs(dx1) > 0.00001f ? (values[i] - values[i - 1]) / dx1 : 0.0f;
+			const float m2 = Abs(dx2) > 0.00001f ? (values[i + 1] - values[i]) / dx2 : 0.0f;
+			m = 0.5f * m1 + 0.5f * m2;
+		}
+		curve.GetKey(i).inSlope = m;
+		curve.GetKey(i).outSlope = m;
+	}
+	curve.InvalidateCache();
+}
+
+static void BakeSharedTimeRotation(FBXAnimationCurve rot[4], const Quaternionf& wrapperRot)
+{
+	const int n = rot[0].GetKeyCount();
+	Quaternionf prev = Quaternionf::identity();
+	for (int k = 0; k < n; ++k)
+	{
+		Quaternionf q(rot[0].GetKey(k).value, rot[1].GetKey(k).value, rot[2].GetKey(k).value, rot[3].GetKey(k).value);
+		Quaternionf qIn(rot[0].GetKey(k).inSlope, rot[1].GetKey(k).inSlope, rot[2].GetKey(k).inSlope, rot[3].GetKey(k).inSlope);
+		Quaternionf qOut(rot[0].GetKey(k).outSlope, rot[1].GetKey(k).outSlope, rot[2].GetKey(k).outSlope, rot[3].GetKey(k).outSlope);
+
+		Quaternionf baked = NormalizeSafe(wrapperRot * q);
+		Quaternionf bakedIn = wrapperRot * qIn;
+		Quaternionf bakedOut = wrapperRot * qOut;
+		if (k > 0 && Dot(baked, prev) < 0.0f)
+		{
+			baked = -baked;
+			bakedIn = -bakedIn;
+			bakedOut = -bakedOut;
+		}
+		prev = baked;
+
+		const float bakedComp[4] = { baked.x, baked.y, baked.z, baked.w };
+		const float bakedInComp[4] = { bakedIn.x, bakedIn.y, bakedIn.z, bakedIn.w };
+		const float bakedOutComp[4] = { bakedOut.x, bakedOut.y, bakedOut.z, bakedOut.w };
+		for (int i = 0; i < 4; ++i)
+		{
+			rot[i].GetKey(k).value = bakedComp[i];
+			rot[i].GetKey(k).inSlope = bakedInComp[i];
+			rot[i].GetKey(k).outSlope = bakedOutComp[i];
 		}
 	}
-	else if (allnodes.size() == 1)
+	for (int i = 0; i < 4; ++i)
+		rot[i].InvalidateCache();
+}
+
+static void BakeSharedTimeTranslation(FBXAnimationCurve trans[3], const FBXImportNode& wrapper)
+{
+	const Quaternionf wrapperRot = CanonicalQuat(wrapper.rotation);
+	const int n = trans[0].GetKeyCount();
+	for (int k = 0; k < n; ++k)
 	{
-		// 单个根节点：跳过第一级，从其下一级（子节点）开始
-		auto rootnode = allnodes[0];
-		auto childnodes = rootnode.children;
-		for (auto i = 0; i < childnodes.size(); i++)
+		Vector3f local(trans[0].GetKey(k).value, trans[1].GetKey(k).value, trans[2].GetKey(k).value);
+		Vector3f inS(trans[0].GetKey(k).inSlope, trans[1].GetKey(k).inSlope, trans[2].GetKey(k).inSlope);
+		Vector3f outS(trans[0].GetKey(k).outSlope, trans[1].GetKey(k).outSlope, trans[2].GetKey(k).outSlope);
+
+		Quaternionf dummyQ;
+		Vector3f dummyS;
+		Vector3f bakedPos;
+		ComposeWrapperRestIntoChild(wrapper, local, Quaternionf::identity(), Vector3f(1.0f, 1.0f, 1.0f), bakedPos, dummyQ, dummyS);
+		Vector3f bakedIn = RotateVectorByQuat(wrapperRot, Vector3f(inS.x * wrapper.scale.x, inS.y * wrapper.scale.y, inS.z * wrapper.scale.z));
+		Vector3f bakedOut = RotateVectorByQuat(wrapperRot, Vector3f(outS.x * wrapper.scale.x, outS.y * wrapper.scale.y, outS.z * wrapper.scale.z));
+
+		for (int i = 0; i < 3; ++i)
 		{
-			BuildBoneNameMap(childnodes[i], gNodePath2Name, "");
+			trans[i].GetKey(k).value = bakedPos[i];
+			trans[i].GetKey(k).inSlope = bakedIn[i];
+			trans[i].GetKey(k).outSlope = bakedOut[i];
+		}
+	}
+	for (int i = 0; i < 3; ++i)
+		trans[i].InvalidateCache();
+}
+
+static void BakeSharedTimeScale(FBXAnimationCurve scale[3], const Vector3f& wrapperScale)
+{
+	const int n = scale[0].GetKeyCount();
+	for (int k = 0; k < n; ++k)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			scale[i].GetKey(k).value *= wrapperScale[i];
+			scale[i].GetKey(k).inSlope *= wrapperScale[i];
+			scale[i].GetKey(k).outSlope *= wrapperScale[i];
+		}
+	}
+	for (int i = 0; i < 3; ++i)
+		scale[i].InvalidateCache();
+}
+
+static void BakeRotationFallback(FBXAnimationCurve rot[4], const Quaternionf& wrapperRot, const Quaternionf& restRot)
+{
+	std::set<float> rotTimes;
+	CollectCurveTimes(rot, 4, rotTimes);
+	if (rotTimes.empty())
+		return;
+
+	std::vector<float> times(rotTimes.begin(), rotTimes.end());
+	std::vector<float> baked[4];
+	for (int i = 0; i < 4; ++i)
+		baked[i].reserve(times.size());
+
+	Quaternionf prev = Quaternionf::identity();
+	for (size_t i = 0; i < times.size(); ++i)
+	{
+		Quaternionf local(
+			EvalCurveOr(rot[0], times[i], restRot.x),
+			EvalCurveOr(rot[1], times[i], restRot.y),
+			EvalCurveOr(rot[2], times[i], restRot.z),
+			EvalCurveOr(rot[3], times[i], restRot.w));
+		Quaternionf composed = NormalizeSafe(wrapperRot * local);
+		if (i > 0 && Dot(composed, prev) < 0.0f)
+			composed = -composed;
+		prev = composed;
+		baked[0].push_back(composed.x);
+		baked[1].push_back(composed.y);
+		baked[2].push_back(composed.z);
+		baked[3].push_back(composed.w);
+	}
+	for (int i = 0; i < 4; ++i)
+		RebuildCurveAtTimes(rot[i], times, baked[i]);
+}
+
+static void BakeTranslationFallback(FBXAnimationCurve trans[3], const FBXImportNode& wrapper, const Vector3f& restPos)
+{
+	std::set<float> transTimes;
+	CollectCurveTimes(trans, 3, transTimes);
+	if (transTimes.empty())
+		return;
+
+	std::vector<float> times(transTimes.begin(), transTimes.end());
+	std::vector<float> baked[3];
+	for (int i = 0; i < 3; ++i)
+		baked[i].reserve(times.size());
+	for (size_t i = 0; i < times.size(); ++i)
+	{
+		Vector3f local(
+			EvalCurveOr(trans[0], times[i], restPos.x),
+			EvalCurveOr(trans[1], times[i], restPos.y),
+			EvalCurveOr(trans[2], times[i], restPos.z));
+		Vector3f composedPos;
+		Quaternionf dummyQ;
+		Vector3f dummyS;
+		ComposeWrapperRestIntoChild(wrapper, local, Quaternionf::identity(), Vector3f(1.0f, 1.0f, 1.0f), composedPos, dummyQ, dummyS);
+		baked[0].push_back(composedPos.x);
+		baked[1].push_back(composedPos.y);
+		baked[2].push_back(composedPos.z);
+	}
+	for (int i = 0; i < 3; ++i)
+		RebuildCurveAtTimes(trans[i], times, baked[i]);
+}
+
+static void BakeScaleFallback(FBXAnimationCurve scale[3], const Vector3f& wrapperScale, const Vector3f& restScale)
+{
+	std::set<float> scaleTimes;
+	CollectCurveTimes(scale, 3, scaleTimes);
+	if (scaleTimes.empty())
+		return;
+
+	std::vector<float> times(scaleTimes.begin(), scaleTimes.end());
+	std::vector<float> baked[3];
+	for (int i = 0; i < 3; ++i)
+		baked[i].reserve(times.size());
+	for (size_t i = 0; i < times.size(); ++i)
+	{
+		baked[0].push_back(EvalCurveOr(scale[0], times[i], restScale.x) * wrapperScale.x);
+		baked[1].push_back(EvalCurveOr(scale[1], times[i], restScale.y) * wrapperScale.y);
+		baked[2].push_back(EvalCurveOr(scale[2], times[i], restScale.z) * wrapperScale.z);
+	}
+	for (int i = 0; i < 3; ++i)
+		RebuildCurveAtTimes(scale[i], times, baked[i]);
+}
+
+static void BakeWrapperRestIntoNodeAnim(const FBXImportNode& wrapper, FBXImportNodeAnimation& anim)
+{
+	if (anim.node == nullptr)
+		return;
+
+	const Quaternionf wrapperRot = CanonicalQuat(wrapper.rotation);
+	const bool rotIdentity =
+		CompareApproximately(wrapperRot.x, 0.0f) &&
+		CompareApproximately(wrapperRot.y, 0.0f) &&
+		CompareApproximately(wrapperRot.z, 0.0f) &&
+		CompareApproximately(wrapperRot.w, 1.0f);
+	const bool scaleIdentity =
+		CompareApproximately(wrapper.scale.x, 1.0f) &&
+		CompareApproximately(wrapper.scale.y, 1.0f) &&
+		CompareApproximately(wrapper.scale.z, 1.0f);
+	const bool posIdentity =
+		CompareApproximately(wrapper.position.x, 0.0f) &&
+		CompareApproximately(wrapper.position.y, 0.0f) &&
+		CompareApproximately(wrapper.position.z, 0.0f);
+
+	if (!rotIdentity)
+	{
+		if (CurvesShareKeyTimes(anim.rotation, 4))
+			BakeSharedTimeRotation(anim.rotation, wrapperRot);
+		else
+			BakeRotationFallback(anim.rotation, wrapperRot, anim.node->rotation);
+	}
+
+	if (!(posIdentity && rotIdentity && scaleIdentity))
+	{
+		if (CurvesShareKeyTimes(anim.translation, 3))
+			BakeSharedTimeTranslation(anim.translation, wrapper);
+		else
+			BakeTranslationFallback(anim.translation, wrapper, anim.node->position);
+	}
+
+	if (!scaleIdentity)
+	{
+		if (CurvesShareKeyTimes(anim.scale, 3))
+			BakeSharedTimeScale(anim.scale, wrapper.scale);
+		else
+			BakeScaleFallback(anim.scale, wrapper.scale, anim.node->scale);
+	}
+}
+
+void BakeAbsorbedWrapperRestIntoDirectChildClips(FBXImportScene& scene)
+{
+	if (!ShouldAbsorbSceneWrapper(scene))
+		return;
+	if (IsWrapperRestIdentity(scene.nodes[0]))
+		return;
+
+	std::set<const FBXImportNode*> directChildren;
+	for (auto i = 0; i < scene.nodes[0].children.size(); i++)
+		directChildren.insert(&scene.nodes[0].children[i]);
+
+	for (auto clip = scene.animationClips.begin(); clip != scene.animationClips.end(); ++clip)
+	{
+		for (auto it = clip->nodeAnimations.begin(); it != clip->nodeAnimations.end(); ++it)
+		{
+			if (it->node != nullptr && directChildren.find(it->node) != directChildren.end())
+				BakeWrapperRestIntoNodeAnim(scene.nodes[0], *it);
 		}
 	}
 }
 
 void BuildMeshBoneRefMap(FBXImportScene& scene)
 {
-	gNodeName2BoneName.clear();
-	gNodeName2BoneBindePose.clear();
+	gMeshBoneRefs.clear();
 	auto meshes = scene.meshes;
 	auto scale = scene.fileScaleFactor;
 	for (auto i = 0; i < meshes.size(); i++)
 	{
 		auto singleMeshBones = meshes[i].bones;
-		std::vector<std::string> boneNames;
-		std::vector<Matrix4x4f> boneBindPoses;
-
-		boneNames.clear();
-		boneBindPoses.clear();
+		MeshBoneRef meshBones;
 		for (auto j = 0; j < singleMeshBones.size(); j++)
 		{
-			std::string name = singleMeshBones[j].node->name;
-			Matrix4x4f& bindpos = singleMeshBones[j].bindpose;
-			Matrix4x4f newPose = bindpos;
+			Matrix4x4f newPose = singleMeshBones[j].bindpose;
 			newPose[12] *= scale;
 			newPose[13] *= scale;
 			newPose[14] *= scale;
-			boneNames.push_back(name);
-			boneBindPoses.push_back(newPose);
+			meshBones.boneNames.push_back(singleMeshBones[j].node->name);
+			meshBones.bindPoses.push_back(newPose);
 		}
-		if (boneNames.size() > 0)
-			gNodeName2BoneName.insert(std::pair<std::string, std::vector<std::string>>(meshes[i].name, boneNames));
-
-		if (boneBindPoses.size() > 0)
-			gNodeName2BoneBindePose.insert(std::pair<std::string, std::vector<Matrix4x4f>>(meshes[i].name, boneBindPoses));
+		if (!meshBones.boneNames.empty())
+			gMeshBoneRefs[meshes[i].name] = meshBones;
 	}
 }
 
 void BuildBlendShapeBoneMap(FBXImportScene& scene)
 {
-	auto allMesh = scene.meshes;
-	for (auto it = allMesh.begin(); it != allMesh.end(); it++)
+	gBlendShapeMesh2Bone.clear();
+	for (const auto& mesh : scene.meshes)
 	{
-		if (it->shapes.size() > 0 && it->vertices.size() > 0)
+		if (mesh.shapes.empty() || mesh.vertices.empty())
+			continue;
+		for (const auto& pair : gNodePtr2Path)
 		{
-			auto blendShapeMeshName = it->name;
-			for (const auto& pair : gNodePath2Name) {
-				if (pair.second == blendShapeMeshName) {
-					auto bonename = pair.first;
-					size_t pos = bonename.rfind('/');
-					if (pos != std::string::npos) 
-					{
-						bonename = bonename.substr(pos + 1);
-					}
-					gBlendShapeMesh2Bone.insert(std::pair<std::string, std::string>(pair.second, bonename));
-					break; 
-				}
+			if (pair.first != nullptr && pair.first->name == mesh.name)
+			{
+				gBlendShapeMesh2Bone[mesh.name] = pair.first->name;
+				break;
 			}
 		}
 	}
@@ -144,18 +507,18 @@ message::UGCResSkinnedMeshExtData BuildMeshExtData(FBXMesh& meshData)
 {
 	std::string meshName = meshData.name;
 	message::UGCResSkinnedMeshExtData ext;
-	if (gNodeName2BoneName.find(meshName) != gNodeName2BoneName.end())
+	auto foundSkin = gMeshBoneRefs.find(meshName);
+	if (foundSkin != gMeshBoneRefs.end())
 	{
-		auto bones = gNodeName2BoneName[meshName];
-		for (auto i = 0; i < bones.size(); i++)
+		for (auto i = 0; i < foundSkin->second.boneNames.size(); i++)
 		{
-			ext.add_bonenames(bones[i]);
+			ext.add_bonenames(foundSkin->second.boneNames[i]);
 		}
 	}
-	if (gBlendShapeMesh2Bone.find(meshName) != gBlendShapeMesh2Bone.end())
+	auto foundBlend = gBlendShapeMesh2Bone.find(meshName);
+	if (foundBlend != gBlendShapeMesh2Bone.end())
 	{
-		auto bone = gBlendShapeMesh2Bone[meshName];
-		ext.add_bonenames(bone);
+		ext.add_bonenames(foundBlend->second);
 		PrebuildFBXMeshForBlendShape(meshData);
 	}
 	return ext;
@@ -803,17 +1166,10 @@ void BuildSingleAnimProtoFile(FBXImportScene& scene, FBXImportAnimationClip& cli
 	//Add Node Animation
 	for (auto it = nodeCurves.begin(); it != nodeCurves.end(); it++)
 	{
+		if (!ShouldWriteAnimNode(it->node))
+			continue;
 		message::UGCResAnimNodeCurves* curNodeProto = AnimClipProto.add_nodeanim();
-		auto nodeName = it->node->name;
-
-		for (auto it = gNodePath2Name.begin(); it != gNodePath2Name.end(); it++)
-		{
-			if (it->second == nodeName)
-			{
-				nodeName = it->first;
-				break;
-			}
-		}
+		auto nodeName = ResolveAnimNodePath(it->node);
 		curNodeProto->set_name(nodeName);
 
 		auto& rotCurves = it->rotation;
@@ -951,22 +1307,20 @@ void BuildSingleAnimBinaryFile(FBXImportScene& scene, FBXImportAnimationClip& cl
 
 	//Node Anim
 	auto& nodeCurves = clip.nodeAnimations;
-	int NodeAnimCurveCount = clip.nodeAnimations.size();
+	int NodeAnimCurveCount = 0;
+	for (auto it = nodeCurves.begin(); it != nodeCurves.end(); ++it)
+	{
+		if (ShouldWriteAnimNode(it->node))
+			++NodeAnimCurveCount;
+	}
 	osData.write(reinterpret_cast<char*>(&NodeAnimCurveCount), sizeof(int));
 
 	for (auto it = nodeCurves.begin(); it != nodeCurves.end(); it++)
 	{
-		auto nodeName = it->node->name;
-
-		for (auto it = gNodePath2Name.begin(); it != gNodePath2Name.end(); it++)
-		{
-			if (it->second == nodeName)
-			{
-				nodeName = it->first;
-				break;
-			}
-		}
-		int NodeNameLength = nodeName.size();
+		if (!ShouldWriteAnimNode(it->node))
+			continue;
+		auto nodeName = ResolveAnimNodePath(it->node);
+		int NodeNameLength = (int)nodeName.size();
 		osData.write(reinterpret_cast<char*>(&NodeNameLength), sizeof(int));
 		osData.write(nodeName.data(), NodeNameLength);
 
@@ -1056,7 +1410,12 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 
 	float fileScale = scene.fileScaleFactor;
 	auto& nodeCurves = clip.nodeAnimations;
-	int NodeAnimCurveCount = nodeCurves.size();
+	int NodeAnimCurveCount = 0;
+	for (auto it = nodeCurves.begin(); it != nodeCurves.end(); ++it)
+	{
+		if (ShouldWriteAnimNode(it->node))
+			++NodeAnimCurveCount;
+	}
 
 	//build head
 	byte MagicNumber1 = 100;
@@ -1086,14 +1445,10 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 	osData << "Node Anim Count: " << NodeAnimCurveCount << std::endl;
 
 	for (auto it = nodeCurves.begin(); it != nodeCurves.end(); it++) {
-		auto nodeName = it->node->name;
-		for (auto it = gNodePath2Name.begin(); it != gNodePath2Name.end(); it++) {
-			if (it->second == nodeName) {
-				nodeName = it->first;
-				break;
-			}
-		}
-		int NodeNameLength = nodeName.size();
+		if (!ShouldWriteAnimNode(it->node))
+			continue;
+		auto nodeName = ResolveAnimNodePath(it->node);
+		int NodeNameLength = (int)nodeName.size();
 		osData << "Node Anim NodeNameLength: " << NodeNameLength << std::endl;
 		osData << "Node Anim NodeName: " << nodeName.data() << std::endl;
 
@@ -1168,16 +1523,21 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 
 void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent, std::string parentpath)
 {
+	BuildBoneNodeData(scene, node, parent, parentpath, node.position, node.rotation, node.scale);
+}
+
+void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent, const std::string& parentpath, const Vector3f& position, const Quaternionf& rotation, const Vector3f& scale)
+{
 	message::UGCResBoneNodeData* msg_node = parent->add_childbones();
 	message::UGCResBoneNodeCapsuleData root_capsule;
 
 	message::ProtoBuffVector3* msg_pos = new message::ProtoBuffVector3();
 	message::ProtoBuffVector3* msg_scale = new message::ProtoBuffVector3();
 	message::ProtoBuffQuaternion* msg_quat = new message::ProtoBuffQuaternion();
-	auto scale = scene.fileScaleFactor;
-	msg_pos->set_x(node.position.x * scale); msg_pos->set_y(node.position.y * scale); msg_pos->set_z(node.position.z * scale);
-	msg_scale->set_x(node.scale.x); msg_scale->set_y(node.scale.y); msg_scale->set_z(node.scale.z);
-	msg_quat->set_x(node.rotation.x); msg_quat->set_y(node.rotation.y); msg_quat->set_z(node.rotation.z); msg_quat->set_w(node.rotation.w);
+	auto fileScale = scene.fileScaleFactor;
+	msg_pos->set_x(position.x * fileScale); msg_pos->set_y(position.y * fileScale); msg_pos->set_z(position.z * fileScale);
+	msg_scale->set_x(scale.x); msg_scale->set_y(scale.y); msg_scale->set_z(scale.z);
+	msg_quat->set_x(rotation.x); msg_quat->set_y(rotation.y); msg_quat->set_z(rotation.z); msg_quat->set_w(rotation.w);
 
 	msg_node->set_bonename(node.name);
 	msg_node->set_allocated_localposition(msg_pos);
@@ -1187,14 +1547,13 @@ void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCR
 	std::string nodePath = nodeName;
 	if (parentpath != "")
 		nodePath = parentpath + "/" + nodeName;
-	gNodePath2Name.insert(std::pair<std::string, std::string>(nodePath, nodeName));
+	RegisterNodePath(node, nodePath);
 	
 	std::string childParentPath = nodePath;
 	
 	for (auto i = 0; i < node.children.size(); i++)
 	{
-		auto nextNode = node.children[i];
-		BuildBoneNodeData(scene, nextNode, msg_node, childParentPath);
+		BuildBoneNodeData(scene, node.children[i], msg_node, childParentPath);
 	}
 }
 

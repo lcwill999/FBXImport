@@ -11,7 +11,7 @@
 #include "ImportMeshDef.h"
 #include "AnimationCurve.h"
 
-const std::string UNITY_BONE_ROOT = "bone_Root";
+const std::string UNITY_BONE_ROOT = "virtual_root";
 
 struct FBXImportSettings;
 struct FBXImportMeshSetting;

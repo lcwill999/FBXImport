@@ -490,18 +490,17 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 {
 	EnsureDirectoryExists(outdir);
 
-	gNodePath2Name.clear();
+	gNodePtr2Path.clear();
 	message::UGCResSkeletonData* sk = new message::UGCResSkeletonData();
 
 	message::UGCResBoneNodeData* root = new message::UGCResBoneNodeData();
 	message::UGCResBoneNodeCapsuleData* root_capsule = new message::UGCResBoneNodeCapsuleData();
-	root->set_bonename("root");
+	root->set_bonename(UNITY_BONE_ROOT);
 	//root->set_allocated_capsuleinfo(root_capsule);
 	sk->set_allocated_rootbone(root);
 	message::ProtoBuffVector3* pos = new message::ProtoBuffVector3();
 	message::ProtoBuffVector3* scale = new message::ProtoBuffVector3();
 	message::ProtoBuffQuaternion* quat = new message::ProtoBuffQuaternion();
-	auto scaleFactor = scene.fileScaleFactor;
 	pos->set_x(0.0f); pos->set_y(0.0f); pos->set_z(0.0f);
 	scale->set_x(1.0f); scale->set_y(1.0f); scale->set_z(1.0f);
 	quat->set_x(0.0f); quat->set_y(0.0f); quat->set_z(0.0f); quat->set_w(1.0f);
@@ -509,40 +508,7 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 	root->set_allocated_localscale(scale);
 	root->set_allocated_localrotation(quat);
 
-	auto allnodes = scene.nodes;
-	if (allnodes.size() > 1)
-	{
-		// multi root - add an "root" node to ensure a single root tree
-		for (auto i = 0; i < allnodes.size(); i++)
-		{
-			BuildBoneNodeData(scene, allnodes[i], root, "");
-		}
-	}
-	else if (allnodes.size() == 1 )
-	{
-		// single root- rename the single name as root
-		auto rootnode = allnodes[0];
-		if (scene.meshes.size()==0)
-		{
-			BuildBoneNodeData(scene, rootnode, root);
-		}
-		else
-		{
-			pos->set_x(rootnode.position.x * scaleFactor); pos->set_y(rootnode.position.y * scaleFactor); pos->set_z(rootnode.position.z * scaleFactor);
-			scale->set_x(rootnode.scale.x); scale->set_y(rootnode.scale.y); scale->set_z(rootnode.scale.z);
-			quat->set_x(rootnode.rotation.x); quat->set_y(rootnode.rotation.y); quat->set_z(rootnode.rotation.z); quat->set_w(rootnode.rotation.w);
-
-			auto childnodes = rootnode.children;
-			for (auto i = 0; i < childnodes.size(); i++)
-			{
-				BuildBoneNodeData(scene, childnodes[i], root, "");
-			}
-		}
-	}
-	//else
-	//{
-	//	// no root, create dummy root
-	//}
+	AttachSceneNodesToSkeleton(scene, root);
 
 
 	std::string directory(outdir);
@@ -585,6 +551,7 @@ void WriteSkeletonProtoBuf(FBXImportScene& scene, const char* outdir, const char
 void WriteAnimClipProtoBuf(FBXImportScene& scene, const char* outdir)
 {
 	EnsureDirectoryExists(outdir);
+	BakeAbsorbedWrapperRestIntoDirectChildClips(scene);
 
 	auto& anim = scene.animationClips;
 	if (gAnimUseFBXName && anim.size() == 1 )

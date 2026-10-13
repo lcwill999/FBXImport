@@ -15,10 +15,15 @@
 // 调试输出宏定义
 #define DebugMeshInfoOutput 0
 
+struct MeshBoneRef
+{
+	std::vector<std::string> boneNames;
+	std::vector<Matrix4x4f> bindPoses;
+};
+
 // 外部全局变量声明
-extern std::map<std::string, std::string> gNodePath2Name;
-extern std::map<std::string, std::vector<std::string>> gNodeName2BoneName;
-extern std::map<std::string, std::vector<Matrix4x4f>> gNodeName2BoneBindePose;
+extern std::map<const FBXImportNode*, std::string> gNodePtr2Path;
+extern std::map<std::string, MeshBoneRef> gMeshBoneRefs;
 extern std::map<std::string, std::string> gBlendShapeMesh2Bone;
 extern std::string gOutPutDir;
 extern std::string gOutPutDirSantinized;
@@ -47,9 +52,12 @@ ucs4 DecodeUTF8_Secure(utf8*& readPtr);
 std::string SanitizeName(const char* name);
 
 // 骨骼名称映射函数声明
-void BuildBoneNameMap(FBXImportNode& node, std::map<std::string, std::string>& path2name, std::string parentpath = "");
+bool ShouldAbsorbSceneWrapper(const FBXImportScene& scene);
+void RegisterNodePath(FBXImportNode& node, const std::string& nodePath);
+void BuildBoneNameMap(FBXImportNode& node, std::string parentpath = "");
 void BuildAllBoneNameMap(FBXImportScene& scene);
-void BuildNodePath2NameForAnim(FBXImportScene& scene);
+std::string ResolveAnimNodePath(const FBXImportNode* node);
+bool ShouldWriteAnimNode(const FBXImportNode* node);
 void BuildMeshBoneRefMap(FBXImportScene& scene);
 void BuildBlendShapeBoneMap(FBXImportScene& scene);
 
@@ -142,6 +150,9 @@ void WriteNodeAnimationsToText(FBXImportScene& scene, FBXImportAnimationClip& cl
 
 // 骨骼数据处理函数声明
 void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent, std::string parentpath = "");
+void BuildBoneNodeData(FBXImportScene& scene, FBXImportNode& node, message::UGCResBoneNodeData* parent, const std::string& parentpath, const Vector3f& position, const Quaternionf& rotation, const Vector3f& scale);
+void AttachSceneNodesToSkeleton(FBXImportScene& scene, message::UGCResBoneNodeData* root);
+void BakeAbsorbedWrapperRestIntoDirectChildClips(FBXImportScene& scene);
 
 // 调试和解析函数声明
 void ParseSingleMesh(std::string meshfile);

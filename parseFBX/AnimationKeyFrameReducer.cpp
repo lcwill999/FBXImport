@@ -110,11 +110,122 @@ static float ReduceKeyframes(const float sampleRate, T& curves, ReductionFunctio
     return totalRatio;
 }
 
+static bool CurvesShareKeyTimes(const FBXAnimationCurve* curves, int count)
+{
+    if (count <= 0 || curves[0].GetKeyCount() <= 0)
+        return false;
+    const int n = curves[0].GetKeyCount();
+    for (int i = 1; i < count; ++i)
+    {
+        if (curves[i].GetKeyCount() != n)
+            return false;
+        for (int k = 0; k < n; ++k)
+        {
+            if (curves[i].GetKey(k).time != curves[0].GetKey(k).time)
+                return false;
+        }
+    }
+    return true;
+}
+
+static void AlignQuaternionFloatCurves(FBXAnimationCurve rot[4])
+{
+    const int n = rot[0].GetKeyCount();
+    Quaternionf prev = Quaternionf::identity();
+    for (int k = 0; k < n; ++k)
+    {
+        Quaternionf q(rot[0].GetKey(k).value, rot[1].GetKey(k).value, rot[2].GetKey(k).value, rot[3].GetKey(k).value);
+        Quaternionf qIn(rot[0].GetKey(k).inSlope, rot[1].GetKey(k).inSlope, rot[2].GetKey(k).inSlope, rot[3].GetKey(k).inSlope);
+        Quaternionf qOut(rot[0].GetKey(k).outSlope, rot[1].GetKey(k).outSlope, rot[2].GetKey(k).outSlope, rot[3].GetKey(k).outSlope);
+        if (k > 0 && Dot(q, prev) < 0.0f)
+        {
+            q = -q;
+            qIn = -qIn;
+            qOut = -qOut;
+        }
+        prev = q;
+        for (int i = 0; i < 4; ++i)
+        {
+            rot[i].GetKey(k).value = q[i];
+            rot[i].GetKey(k).inSlope = qIn[i];
+            rot[i].GetKey(k).outSlope = qOut[i];
+        }
+    }
+    for (int i = 0; i < 4; ++i)
+        rot[i].InvalidateCache();
+}
+
+static float ReduceQuaternionFloatCurves(FBXAnimationCurve rot[4], float sampleRate, float quaternionDotError)
+{
+    if (!CurvesShareKeyTimes(rot, 4))
+        return 100.0f;
+
+    AlignQuaternionFloatCurves(rot);
+
+    FBXAnimationCurveQuat collapsed;
+    collapsed.preInfinity = rot[0].preInfinity;
+    collapsed.postInfinity = rot[0].postInfinity;
+    collapsed.SetRotationOrder(rot[0].GetRotationOrder());
+
+    const int n = rot[0].GetKeyCount();
+    for (int k = 0; k < n; ++k)
+    {
+        FBXKeyFrameTpl<Quaternionf> key;
+        key.time = rot[0].GetKey(k).time;
+        key.weightedMode = rot[0].GetKey(k).weightedMode;
+        key.value = Quaternionf(rot[0].GetKey(k).value, rot[1].GetKey(k).value, rot[2].GetKey(k).value, rot[3].GetKey(k).value);
+        key.inSlope = Quaternionf(rot[0].GetKey(k).inSlope, rot[1].GetKey(k).inSlope, rot[2].GetKey(k).inSlope, rot[3].GetKey(k).inSlope);
+        key.outSlope = Quaternionf(rot[0].GetKey(k).outSlope, rot[1].GetKey(k).outSlope, rot[2].GetKey(k).outSlope, rot[3].GetKey(k).outSlope);
+        key.inWeight = Quaternionf(rot[0].GetKey(k).inWeight, rot[1].GetKey(k).inWeight, rot[2].GetKey(k).inWeight, rot[3].GetKey(k).inWeight);
+        key.outWeight = Quaternionf(rot[0].GetKey(k).outWeight, rot[1].GetKey(k).outWeight, rot[2].GetKey(k).outWeight, rot[3].GetKey(k).outWeight);
+        collapsed.AddKeyBackFast(key);
+    }
+    collapsed.InvalidateCache();
+
+    const float reduction = ReduceKeyframes(collapsed, sampleRate, QuaternionDistanceError, quaternionDotError, Quaternionf(0.0f, 0.0f, 0.0f, 0.0f));
+
+    InternalWrapMode pre[4];
+    InternalWrapMode post[4];
+    RotationOrder rotOrder[4];
+    for (int i = 0; i < 4; ++i)
+    {
+        pre[i] = rot[i].preInfinity;
+        post[i] = rot[i].postInfinity;
+        rotOrder[i] = rot[i].GetRotationOrder();
+        rot[i].m_Curve.clear();
+    }
+
+    for (int k = 0; k < collapsed.GetKeyCount(); ++k)
+    {
+        const FBXKeyFrameTpl<Quaternionf>& key = collapsed.GetKey(k);
+        for (int i = 0; i < 4; ++i)
+        {
+            FBXKeyFrameTpl<float> floatKey;
+            floatKey.time = key.time;
+            floatKey.weightedMode = key.weightedMode;
+            floatKey.value = key.value[i];
+            floatKey.inSlope = key.inSlope[i];
+            floatKey.outSlope = key.outSlope[i];
+            floatKey.inWeight = key.inWeight[i];
+            floatKey.outWeight = key.outWeight[i];
+            rot[i].AddKeyBackFast(floatKey);
+        }
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        rot[i].preInfinity = pre[i];
+        rot[i].postInfinity = post[i];
+        rot[i].SetRotationOrder(rotOrder[i]);
+        rot[i].InvalidateCache();
+    }
+
+    return reduction;
+}
+
 void ReduceKeyframes(FBXImportAnimationClip& clip, float sampleRate ,float rotationError, float positionError, float scaleError, float floatError)
 {
-    
     FBXImportNodeAnimations& nodeAnim = clip.nodeAnimations;
-    FBXImportFloatAnimations& floatAnim = clip.floatAnimations;
     rotationError = cos(Deg2Rad(rotationError) / 2.0F);
     positionError = positionError / 100.0F;
     scaleError = scaleError / 100.0F;
@@ -123,24 +234,19 @@ void ReduceKeyframes(FBXImportAnimationClip& clip, float sampleRate ,float rotat
     auto start_time = std::chrono::high_resolution_clock::now();
    
     float averageCompressionRatio = 0;
-    //int totalFrame = 0;
-    auto& rot = nodeAnim.begin()->rotation;
     for (auto it = nodeAnim.begin(); it != nodeAnim.end(); it++)
     {
         auto& rot = it->rotation;
         auto& scale = it->scale;
         auto& pos = it->translation;
-        
-        averageCompressionRatio += ReduceKeyframes(rot[0], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(rot[1], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(rot[2], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(rot[3], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(scale[0], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(scale[1], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(scale[2], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(pos[0], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(pos[1], sampleRate, FloatDistanceError, floatError, 0.f);
-        averageCompressionRatio += ReduceKeyframes(pos[2], sampleRate, FloatDistanceError, floatError, 0.f);
+
+        averageCompressionRatio += ReduceQuaternionFloatCurves(rot, sampleRate, rotationError);
+        averageCompressionRatio += ReduceKeyframes(scale[0], sampleRate, FloatDistanceError, scaleError, 0.f);
+        averageCompressionRatio += ReduceKeyframes(scale[1], sampleRate, FloatDistanceError, scaleError, 0.f);
+        averageCompressionRatio += ReduceKeyframes(scale[2], sampleRate, FloatDistanceError, scaleError, 0.f);
+        averageCompressionRatio += ReduceKeyframes(pos[0], sampleRate, FloatDistanceError, positionError, 0.f);
+        averageCompressionRatio += ReduceKeyframes(pos[1], sampleRate, FloatDistanceError, positionError, 0.f);
+        averageCompressionRatio += ReduceKeyframes(pos[2], sampleRate, FloatDistanceError, positionError, 0.f);
     }
      
     // If all the curves are empty, we end up with zero reduction.
@@ -149,7 +255,7 @@ void ReduceKeyframes(FBXImportAnimationClip& clip, float sampleRate ,float rotat
     auto end_time = std::chrono::high_resolution_clock::now();
     //auto duration = end_time - start_time;
     //auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-    averageCompressionRatio /= 10 * nodeAnim.size();
+    averageCompressionRatio /= 7 * nodeAnim.size();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
     {
